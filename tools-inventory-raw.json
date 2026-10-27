@@ -1,0 +1,971 @@
+[
+  {
+    "id": "pdf-compress",
+    "title": "Compress PDF",
+    "category": "pdf",
+    "mode": "browser",
+    "description": "Reduce PDF file size while preserving quality. Adjust compression level to balance size and visual fidelity.",
+    "inFormats": [
+      "pdf"
+    ],
+    "outFormats": [
+      "pdf"
+    ]
+  },
+  {
+    "id": "pdf-merge",
+    "title": "Merge PDF",
+    "category": "pdf",
+    "mode": "browser",
+    "description": "Combine multiple PDF files into one document. Drag to reorder pages before merging.",
+    "inFormats": [
+      "pdf"
+    ],
+    "outFormats": [
+      "pdf"
+    ]
+  },
+  {
+    "id": "pdf-split",
+    "title": "Split PDF",
+    "category": "pdf",
+    "mode": "browser",
+    "description": "Split a PDF into individual pages or custom page ranges.",
+    "inFormats": [
+      "pdf"
+    ],
+    "outFormats": [
+      "pdf"
+    ]
+  },
+  {
+    "id": "pdf-to-images",
+    "title": "PDF to Images",
+    "category": "pdf",
+    "mode": "browser",
+    "description": "Convert each PDF page to a JPG or PNG image.",
+    "inFormats": [
+      "pdf"
+    ],
+    "outFormats": [
+      "jpg",
+      "png"
+    ]
+  },
+  {
+    "id": "images-to-pdf",
+    "title": "Images to PDF",
+    "category": "pdf",
+    "mode": "browser",
+    "description": "Combine JPG, PNG, or WebP images into a single PDF file.",
+    "inFormats": [
+      "jpg",
+      "jpeg",
+      "png",
+      "webp"
+    ],
+    "outFormats": [
+      "pdf"
+    ]
+  },
+  {
+    "id": "pdf-rotate",
+    "title": "Rotate PDF Pages",
+    "category": "pdf",
+    "mode": "browser",
+    "description": "Rotate individual or all pages in a PDF by 90°, 180°, or 270°.",
+    "inFormats": [
+      "pdf"
+    ],
+    "outFormats": [
+      "pdf"
+    ]
+  },
+  {
+    "id": "pdf-reorder",
+    "title": "Reorder PDF Pages",
+    "category": "pdf",
+    "mode": "browser",
+    "description": "Drag and drop to reorder, delete, or duplicate pages in your PDF.",
+    "inFormats": [
+      "pdf"
+    ],
+    "outFormats": [
+      "pdf"
+    ]
+  },
+  {
+    "id": "pdf-watermark",
+    "title": "Add Watermark to PDF",
+    "category": "pdf",
+    "mode": "browser",
+    "description": "Add text or image watermarks to PDF pages. Control opacity, position, and rotation.",
+    "inFormats": [
+      "pdf"
+    ],
+    "outFormats": [
+      "pdf"
+    ]
+  },
+  {
+    "id": "pdf-page-numbers",
+    "title": "Add Page Numbers",
+    "category": "pdf",
+    "mode": "browser",
+    "description": "Add page numbers to PDF pages with custom position, font, and starting number.",
+    "inFormats": [
+      "pdf"
+    ],
+    "outFormats": [
+      "pdf"
+    ]
+  },
+  {
+    "id": "pdf-metadata",
+    "title": "PDF Metadata Inspector",
+    "category": "pdf",
+    "mode": "browser",
+    "description": "View and edit PDF metadata: title, author, subject, keywords, creation date.",
+    "inFormats": [
+      "pdf"
+    ],
+    "outFormats": [
+      "pdf"
+    ]
+  },
+  {
+    "id": "pdf-to-text",
+    "title": "Extract Text from PDF",
+    "category": "pdf",
+    "mode": "browser",
+    "description": "Extract all text content from a PDF file and save as plain text or Markdown.",
+    "inFormats": [
+      "pdf"
+    ],
+    "outFormats": [
+      "txt",
+      "md"
+    ]
+  },
+  {
+    "id": "pdf-ocr",
+    "title": "OCR Scanned PDF",
+    "category": "pdf",
+    "mode": "browser",
+    "description": "Use Tesseract.js to recognize text in scanned or image-based PDF pages. Runs entirely in your browser.",
+    "inFormats": [
+      "pdf"
+    ],
+    "outFormats": [
+      "txt",
+      "pdf"
+    ]
+  },
+  {
+    "id": "pdf-protect",
+    "title": "Protect PDF with Password",
+    "category": "pdf",
+    "mode": "browser",
+    "description": "Add password protection to a PDF. Set user and/or owner passwords.",
+    "inFormats": [
+      "pdf"
+    ],
+    "outFormats": [
+      "pdf"
+    ]
+  },
+  {
+    "id": "pdf-editor",
+    "title": "PDF Annotation Editor",
+    "category": "pdf",
+    "mode": "browser",
+    "description": "View PDFs with zoom and navigation. Add text boxes, highlights, drawings, and signatures. Note: overlays new content — does not edit embedded PDF text.",
+    "inFormats": [
+      "pdf"
+    ],
+    "outFormats": [
+      "pdf"
+    ]
+  },
+  {
+    "id": "image-convert",
+    "title": "Convert Image Format",
+    "category": "image",
+    "mode": "browser",
+    "description": "Convert between JPG, PNG, WebP, BMP, GIF, and more using browser Canvas API.",
+    "inFormats": [
+      "jpg",
+      "jpeg",
+      "png",
+      "webp",
+      "gif",
+      "bmp",
+      "avif"
+    ],
+    "outFormats": [
+      "jpg",
+      "png",
+      "webp",
+      "gif",
+      "bmp"
+    ]
+  },
+  {
+    "id": "image-compress",
+    "title": "Compress Image",
+    "category": "image",
+    "mode": "browser",
+    "description": "Reduce image file size with a quality slider. See before/after file sizes instantly. Runs in browser.",
+    "inFormats": [
+      "jpg",
+      "jpeg",
+      "png",
+      "webp"
+    ],
+    "outFormats": [
+      "jpg",
+      "png",
+      "webp"
+    ]
+  },
+  {
+    "id": "image-resize",
+    "title": "Resize Image",
+    "category": "image",
+    "mode": "browser",
+    "description": "Resize images by pixels, percentage, or to fit specific dimensions. Aspect-ratio lock included.",
+    "inFormats": [
+      "jpg",
+      "jpeg",
+      "png",
+      "webp",
+      "gif",
+      "bmp"
+    ],
+    "outFormats": [
+      "jpg",
+      "png",
+      "webp"
+    ]
+  },
+  {
+    "id": "image-crop",
+    "title": "Crop Image",
+    "category": "image",
+    "mode": "browser",
+    "description": "Crop images with freeform or aspect-ratio-locked selection.",
+    "inFormats": [
+      "jpg",
+      "jpeg",
+      "png",
+      "webp"
+    ],
+    "outFormats": [
+      "jpg",
+      "png",
+      "webp"
+    ]
+  },
+  {
+    "id": "image-rotate",
+    "title": "Rotate & Flip Image",
+    "category": "image",
+    "mode": "browser",
+    "description": "Rotate images by any degree or flip horizontally/vertically.",
+    "inFormats": [
+      "jpg",
+      "jpeg",
+      "png",
+      "webp",
+      "gif"
+    ],
+    "outFormats": [
+      "jpg",
+      "png",
+      "webp"
+    ]
+  },
+  {
+    "id": "image-filters",
+    "title": "Image Filters & Adjustments",
+    "category": "image",
+    "mode": "browser",
+    "description": "Apply brightness, contrast, saturation, hue, sharpness, blur, and grayscale adjustments.",
+    "inFormats": [
+      "jpg",
+      "jpeg",
+      "png",
+      "webp"
+    ],
+    "outFormats": [
+      "jpg",
+      "png",
+      "webp"
+    ]
+  },
+  {
+    "id": "image-watermark",
+    "title": "Watermark Image",
+    "category": "image",
+    "mode": "browser",
+    "description": "Add text or image watermarks to photos. Control font, color, opacity, and position.",
+    "inFormats": [
+      "jpg",
+      "jpeg",
+      "png",
+      "webp"
+    ],
+    "outFormats": [
+      "jpg",
+      "png",
+      "webp"
+    ]
+  },
+  {
+    "id": "image-to-pdf",
+    "title": "Image to PDF",
+    "category": "image",
+    "mode": "browser",
+    "description": "Convert one or more images into a single PDF document.",
+    "inFormats": [
+      "jpg",
+      "jpeg",
+      "png",
+      "webp"
+    ],
+    "outFormats": [
+      "pdf"
+    ]
+  },
+  {
+    "id": "image-metadata",
+    "title": "EXIF Metadata Viewer",
+    "category": "image",
+    "mode": "browser",
+    "description": "View EXIF, IPTC, and XMP metadata embedded in photos. Camera, GPS, date, and exposure data.",
+    "inFormats": [
+      "jpg",
+      "jpeg",
+      "tiff",
+      "heic"
+    ],
+    "outFormats": []
+  },
+  {
+    "id": "image-remove-exif",
+    "title": "Remove EXIF Data",
+    "category": "image",
+    "mode": "browser",
+    "description": "Strip all metadata from images for privacy. Removes GPS, camera model, and timestamps.",
+    "inFormats": [
+      "jpg",
+      "jpeg",
+      "png",
+      "webp"
+    ],
+    "outFormats": [
+      "jpg",
+      "png",
+      "webp"
+    ]
+  },
+  {
+    "id": "image-batch-convert",
+    "title": "Batch Image Convert",
+    "category": "image",
+    "mode": "browser",
+    "description": "Convert many images at once to a single format. Download as ZIP.",
+    "inFormats": [
+      "jpg",
+      "jpeg",
+      "png",
+      "webp",
+      "gif",
+      "bmp"
+    ],
+    "outFormats": [
+      "jpg",
+      "png",
+      "webp"
+    ]
+  },
+  {
+    "id": "image-batch-compress",
+    "title": "Batch Image Compress",
+    "category": "image",
+    "mode": "browser",
+    "description": "Compress many images at once. Download all as ZIP.",
+    "inFormats": [
+      "jpg",
+      "jpeg",
+      "png",
+      "webp"
+    ],
+    "outFormats": [
+      "jpg",
+      "png",
+      "webp"
+    ]
+  },
+  {
+    "id": "ico-creator",
+    "title": "Create ICO File",
+    "category": "image",
+    "mode": "browser",
+    "description": "Convert an image into an ICO file for use as a website favicon or app icon.",
+    "inFormats": [
+      "jpg",
+      "jpeg",
+      "png",
+      "webp"
+    ],
+    "outFormats": [
+      "ico"
+    ]
+  },
+  {
+    "id": "docx-editor",
+    "title": "Word Document Editor",
+    "category": "document",
+    "mode": "browser",
+    "description": "Open, edit, and save DOCX files with rich-text formatting. Export to DOCX or plain text.",
+    "inFormats": [
+      "docx"
+    ],
+    "outFormats": [
+      "docx",
+      "txt",
+      "html"
+    ]
+  },
+  {
+    "id": "docx-to-pdf",
+    "title": "DOCX to PDF",
+    "category": "document",
+    "mode": "server",
+    "description": "Convert Word documents to PDF. Preserves supported formatting, headings, tables, and images.",
+    "inFormats": [
+      "docx"
+    ],
+    "outFormats": [
+      "pdf"
+    ]
+  },
+  {
+    "id": "pdf-to-docx",
+    "title": "PDF to DOCX",
+    "category": "document",
+    "mode": "browser",
+    "description": "Extract text and structure from a PDF and create an editable DOCX file. Complex layouts may simplify.",
+    "inFormats": [
+      "pdf"
+    ],
+    "outFormats": [
+      "docx"
+    ]
+  },
+  {
+    "id": "txt-to-docx",
+    "title": "Text to DOCX",
+    "category": "document",
+    "mode": "browser",
+    "description": "Convert plain text or Markdown into a formatted DOCX document.",
+    "inFormats": [
+      "txt",
+      "md"
+    ],
+    "outFormats": [
+      "docx"
+    ]
+  },
+  {
+    "id": "markdown-editor",
+    "title": "Markdown Editor & Converter",
+    "category": "document",
+    "mode": "browser",
+    "description": "Write and preview Markdown. Export to HTML, PDF, or plain text.",
+    "inFormats": [
+      "md",
+      "txt"
+    ],
+    "outFormats": [
+      "html",
+      "pdf",
+      "txt"
+    ]
+  },
+  {
+    "id": "html-to-pdf",
+    "title": "HTML to PDF",
+    "category": "document",
+    "mode": "browser",
+    "description": "Convert an HTML file or URL to PDF using browser print engine.",
+    "inFormats": [
+      "html",
+      "htm"
+    ],
+    "outFormats": [
+      "pdf"
+    ]
+  },
+  {
+    "id": "docx-to-txt",
+    "title": "Extract Text from DOCX",
+    "category": "document",
+    "mode": "browser",
+    "description": "Extract all text content from a Word document as plain text.",
+    "inFormats": [
+      "docx"
+    ],
+    "outFormats": [
+      "txt"
+    ]
+  },
+  {
+    "id": "csv-to-xlsx",
+    "title": "CSV to Excel",
+    "category": "document",
+    "mode": "browser",
+    "description": "Convert CSV files to XLSX Excel spreadsheets with proper column detection.",
+    "inFormats": [
+      "csv"
+    ],
+    "outFormats": [
+      "xlsx"
+    ]
+  },
+  {
+    "id": "xlsx-editor",
+    "title": "Spreadsheet Editor",
+    "category": "document",
+    "mode": "browser",
+    "description": "View and edit CSV and XLSX spreadsheets in the browser. Sort, filter, and export.",
+    "inFormats": [
+      "csv",
+      "xlsx"
+    ],
+    "outFormats": [
+      "csv",
+      "xlsx"
+    ]
+  },
+  {
+    "id": "docx-merge",
+    "title": "Merge Word Documents",
+    "category": "document",
+    "mode": "browser",
+    "description": "Concatenate multiple DOCX files into one document.",
+    "inFormats": [
+      "docx"
+    ],
+    "outFormats": [
+      "docx"
+    ]
+  },
+  {
+    "id": "video-convert",
+    "title": "Convert Video Format",
+    "category": "video",
+    "mode": "server",
+    "description": "Convert between MP4, WebM, MKV, AVI, MOV, and more using FFmpeg on the server.",
+    "inFormats": [
+      "mp4",
+      "webm",
+      "mkv",
+      "avi",
+      "mov",
+      "flv",
+      "m4v"
+    ],
+    "outFormats": [
+      "mp4",
+      "webm",
+      "mkv",
+      "avi",
+      "mov"
+    ]
+  },
+  {
+    "id": "video-compress",
+    "title": "Compress Video",
+    "category": "video",
+    "mode": "server",
+    "description": "Reduce video file size with CRF-based compression. Choose quality and output format.",
+    "inFormats": [
+      "mp4",
+      "webm",
+      "mkv",
+      "avi",
+      "mov"
+    ],
+    "outFormats": [
+      "mp4",
+      "webm"
+    ]
+  },
+  {
+    "id": "video-trim",
+    "title": "Trim Video",
+    "category": "video",
+    "mode": "server",
+    "description": "Cut a section from a video by setting start and end times. Fast stream-copy mode available.",
+    "inFormats": [
+      "mp4",
+      "webm",
+      "mkv",
+      "avi",
+      "mov"
+    ],
+    "outFormats": [
+      "mp4",
+      "webm"
+    ]
+  },
+  {
+    "id": "video-to-gif",
+    "title": "Video to GIF",
+    "category": "video",
+    "mode": "server",
+    "description": "Convert a video clip to an animated GIF. Control frame rate, palette, and scale.",
+    "inFormats": [
+      "mp4",
+      "webm",
+      "mov"
+    ],
+    "outFormats": [
+      "gif"
+    ]
+  },
+  {
+    "id": "video-extract-audio",
+    "title": "Extract Audio from Video",
+    "category": "video",
+    "mode": "server",
+    "description": "Extract the audio track from any video file. Save as MP3, AAC, WAV, or OGG.",
+    "inFormats": [
+      "mp4",
+      "webm",
+      "mkv",
+      "avi",
+      "mov",
+      "flv"
+    ],
+    "outFormats": [
+      "mp3",
+      "aac",
+      "wav",
+      "ogg"
+    ]
+  },
+  {
+    "id": "video-thumbnail",
+    "title": "Extract Video Thumbnail",
+    "category": "video",
+    "mode": "server",
+    "description": "Extract a frame from a video at a specific timestamp as an image.",
+    "inFormats": [
+      "mp4",
+      "webm",
+      "mkv",
+      "mov",
+      "avi"
+    ],
+    "outFormats": [
+      "jpg",
+      "png"
+    ]
+  },
+  {
+    "id": "video-mute",
+    "title": "Remove Audio from Video",
+    "category": "video",
+    "mode": "server",
+    "description": "Strip the audio track from a video file, producing a silent video.",
+    "inFormats": [
+      "mp4",
+      "webm",
+      "mkv",
+      "mov",
+      "avi"
+    ],
+    "outFormats": [
+      "mp4",
+      "webm"
+    ]
+  },
+  {
+    "id": "video-resize",
+    "title": "Change Video Resolution",
+    "category": "video",
+    "mode": "server",
+    "description": "Resize video to 720p, 1080p, 480p, or custom dimensions. Maintains aspect ratio.",
+    "inFormats": [
+      "mp4",
+      "webm",
+      "mkv",
+      "mov",
+      "avi"
+    ],
+    "outFormats": [
+      "mp4",
+      "webm"
+    ]
+  },
+  {
+    "id": "mp4-to-mp3",
+    "title": "MP4 to MP3",
+    "category": "video",
+    "mode": "server",
+    "description": "Quickly extract audio from an MP4 video and save as high-quality MP3.",
+    "inFormats": [
+      "mp4"
+    ],
+    "outFormats": [
+      "mp3"
+    ]
+  },
+  {
+    "id": "audio-convert",
+    "title": "Convert Audio Format",
+    "category": "audio",
+    "mode": "server",
+    "description": "Convert between MP3, WAV, AAC, OGG, FLAC, M4A, and Opus using FFmpeg.",
+    "inFormats": [
+      "mp3",
+      "wav",
+      "aac",
+      "ogg",
+      "flac",
+      "m4a",
+      "opus",
+      "wma"
+    ],
+    "outFormats": [
+      "mp3",
+      "wav",
+      "aac",
+      "ogg",
+      "flac",
+      "m4a",
+      "opus"
+    ]
+  },
+  {
+    "id": "audio-compress",
+    "title": "Compress Audio",
+    "category": "audio",
+    "mode": "server",
+    "description": "Reduce audio file size by adjusting bitrate. Preview quality before downloading.",
+    "inFormats": [
+      "mp3",
+      "wav",
+      "aac",
+      "ogg",
+      "flac",
+      "m4a"
+    ],
+    "outFormats": [
+      "mp3",
+      "aac",
+      "ogg"
+    ]
+  },
+  {
+    "id": "audio-trim",
+    "title": "Trim Audio",
+    "category": "audio",
+    "mode": "server",
+    "description": "Cut audio by setting start and end times. Supports all major formats.",
+    "inFormats": [
+      "mp3",
+      "wav",
+      "aac",
+      "ogg",
+      "flac",
+      "m4a"
+    ],
+    "outFormats": [
+      "mp3",
+      "wav",
+      "aac"
+    ]
+  },
+  {
+    "id": "audio-merge",
+    "title": "Merge Audio Tracks",
+    "category": "audio",
+    "mode": "server",
+    "description": "Concatenate multiple audio files into one. Supports MP3, WAV, and compatible formats.",
+    "inFormats": [
+      "mp3",
+      "wav",
+      "aac",
+      "ogg"
+    ],
+    "outFormats": [
+      "mp3",
+      "wav"
+    ]
+  },
+  {
+    "id": "audio-to-wav",
+    "title": "Convert Audio to WAV",
+    "category": "audio",
+    "mode": "server",
+    "description": "Convert any supported audio format to uncompressed WAV (PCM).",
+    "inFormats": [
+      "mp3",
+      "aac",
+      "ogg",
+      "flac",
+      "m4a",
+      "opus"
+    ],
+    "outFormats": [
+      "wav"
+    ]
+  },
+  {
+    "id": "audio-volume",
+    "title": "Adjust Audio Volume",
+    "category": "audio",
+    "mode": "server",
+    "description": "Increase or decrease audio volume by dB. Normalize audio level.",
+    "inFormats": [
+      "mp3",
+      "wav",
+      "aac",
+      "ogg",
+      "flac"
+    ],
+    "outFormats": [
+      "mp3",
+      "wav"
+    ]
+  },
+  {
+    "id": "audio-fade",
+    "title": "Fade In / Fade Out Audio",
+    "category": "audio",
+    "mode": "server",
+    "description": "Add fade-in and fade-out effects to audio files. Set duration in seconds.",
+    "inFormats": [
+      "mp3",
+      "wav",
+      "aac",
+      "ogg"
+    ],
+    "outFormats": [
+      "mp3",
+      "wav"
+    ]
+  },
+  {
+    "id": "zip-create",
+    "title": "Create ZIP Archive",
+    "category": "archive",
+    "mode": "browser",
+    "description": "Compress multiple files into a single ZIP archive. Runs entirely in browser.",
+    "inFormats": [
+      "*"
+    ],
+    "outFormats": [
+      "zip"
+    ]
+  },
+  {
+    "id": "zip-extract",
+    "title": "Extract ZIP Archive",
+    "category": "archive",
+    "mode": "browser",
+    "description": "Extract files from a ZIP archive. Preview contents and download selected files.",
+    "inFormats": [
+      "zip"
+    ],
+    "outFormats": [
+      "*"
+    ]
+  },
+  {
+    "id": "file-hash",
+    "title": "File Hash Calculator",
+    "category": "utility",
+    "mode": "browser",
+    "description": "Calculate MD5, SHA-1, SHA-256, or SHA-512 hashes for any file. Runs in browser — files never leave your device.",
+    "inFormats": [
+      "*"
+    ],
+    "outFormats": []
+  },
+  {
+    "id": "json-formatter",
+    "title": "JSON Formatter & Validator",
+    "category": "utility",
+    "mode": "browser",
+    "description": "Format, validate, minify, and inspect JSON data. Tree view and syntax highlighting.",
+    "inFormats": [
+      "json"
+    ],
+    "outFormats": [
+      "json"
+    ]
+  },
+  {
+    "id": "csv-preview",
+    "title": "CSV Viewer & Converter",
+    "category": "utility",
+    "mode": "browser",
+    "description": "Preview CSV files as a table. Convert to JSON, XLSX, or TSV.",
+    "inFormats": [
+      "csv",
+      "tsv"
+    ],
+    "outFormats": [
+      "json",
+      "xlsx",
+      "tsv",
+      "csv"
+    ]
+  },
+  {
+    "id": "base64-encode",
+    "title": "Base64 Encoder / Decoder",
+    "category": "utility",
+    "mode": "browser",
+    "description": "Encode files or text to Base64, or decode Base64 back to original. Great for email attachments and data URIs.",
+    "inFormats": [
+      "*"
+    ],
+    "outFormats": [
+      "txt",
+      "b64"
+    ]
+  },
+  {
+    "id": "yaml-formatter",
+    "title": "YAML Formatter & Validator",
+    "category": "utility",
+    "mode": "browser",
+    "description": "Format, validate, and convert YAML files. Convert between YAML and JSON.",
+    "inFormats": [
+      "yaml",
+      "yml",
+      "json"
+    ],
+    "outFormats": [
+      "yaml",
+      "json"
+    ]
+  },
+  {
+    "id": "file-metadata",
+    "title": "File Metadata Inspector",
+    "category": "utility",
+    "mode": "browser",
+    "description": "Inspect file type, size, MIME type, and basic metadata without uploading to any server.",
+    "inFormats": [
+      "*"
+    ],
+    "outFormats": []
+  }
+]
