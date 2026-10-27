@@ -17,15 +17,25 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: {
-    default: 'FileKit — Every File. Every Format. One Workspace. No SingUp. No Login',
-    template: '%s | FileKit',
+    default: "FileKit — Every File. Every Format. One Workspace.",
+    template: "%s | FileKit",
   },
   description: `Convert, compress, and edit files in the browser. ${AVAILABLE_TOOL_COUNT} free tools. No account required.`,
-  keywords: ['file converter', 'pdf tools', 'image converter', 'video converter', 'audio converter', 'compress files'],
+  keywords: [
+    "file converter",
+    "pdf tools",
+    "image converter",
+    "video converter",
+    "audio converter",
+    "compress files",
+  ],
+  icons: {
+    icon: "/favicon.svg?v=2",
+  },
   openGraph: {
-    title: 'FileKit',
-    description: 'Every File. Every Format. One Workspace.',
-    type: 'website',
+    title: "FileKit",
+    description: "Every File. Every Format. One Workspace.",
+    type: "website",
   },
 };
 

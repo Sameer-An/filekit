@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!-- bg-primary/90 → #16a34a @ 90% opacity -->
+  <rect width="32" height="32" rx="9" fill="#16a34a" fill-opacity="0.9" />
+
+  <g transform="translate(6 6) scale(0.8333)"
+     stroke="#ffffff"
+     stroke-width="2"
+     stroke-linecap="round"
+     stroke-linejoin="round"
+     fill="none">
+    <path d="M11 21a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1" />
+    <path d="M16 16a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1" />
+    <path d="M21 6a2 2 0 0 0-.586-1.414l-2-2A2 2 0 0 0 17 2h-3a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1z" />
+  </g>
+</svg>
