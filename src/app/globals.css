@@ -1,6 +1,9 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Add this only if the gaps are still not visible after Step 1 & 2 */
+/* @import "tiptap-pagination-plus/dist/style.css"; */
+
 @theme inline {
   --color-background: hsl(var(--background));
   --color-foreground: hsl(var(--foreground));
@@ -29,7 +32,6 @@
 }
 
 :root {
-  /* ChatGPT-like canvas, WhatsApp teal primary, Instagram-soft radius */
   --background: 0 0% 97%;
   --foreground: 220 18% 12%;
   --card: 0 0% 100%;
@@ -128,153 +130,149 @@ body {
     hsl(var(--background));
 }
 
-.prose-content h1,
-.prose-content h2,
-.prose-content h3 {
-  font-weight: 700;
-  line-height: 1.25;
-}
+/* =========================================
+   PROSEMIRROR / TIPTAP EDITOR STYLES
+   ========================================= */
 
-.prose-content p {
-  margin-bottom: 0.75rem;
-}
-
-.prose-content ul,
-.prose-content ol {
-  padding-left: 1.5rem;
-  margin-bottom: 0.75rem;
-}
-
-.prose-content li {
-  margin-bottom: 0.25rem;
-}
-
-
-
-/* Word-like editor surface */
-.word-page {
-  background: #fff;
-  max-width: 8.5in;
-  min-height: 11in;
-  margin: 0 auto;
-  padding: 1in;
-  box-shadow: 0 2px 20px rgba(0, 0, 0, 0.12);
-  font-family: Calibri, "Times New Roman", serif;
-  font-size: 11pt;
-  line-height: 1.5;
-  color: #1e1e1e;
-}
-
+/* Core Editor Setup */
 .ProseMirror {
   outline: none;
+  /* min-height: 1000px; */
+  /* Gives the editor enough height to start scrolling */
+  /* padding-bottom: 50px; */
+  white-space: pre-wrap;
+  word-wrap: break-word;
 }
 
-.ProseMirror p {
-  margin: 0 0 0.75em 0;
+/* Force dark text on the white page, even in dark mode */
+.ProseMirror p,
+.ProseMirror h1,
+.ProseMirror h2,
+.ProseMirror h3,
+.ProseMirror h4,
+.ProseMirror h5,
+.ProseMirror h6,
+.ProseMirror li,
+.ProseMirror blockquote {
+  color: #111827 !important;
+  margin-bottom: 12px;
+  /* Default paragraph spacing */
 }
 
-.ProseMirror h1 {
-  font-size: 2em;
-  font-weight: 700;
-  margin: 1.2em 0 0.5em;
+/* Preserve specific alignments from Word/Mammoth */
+.ProseMirror p[style*="text-align: center"],
+.ProseMirror h1[style*="text-align: center"],
+.ProseMirror h2[style*="text-align: center"] {
+  text-align: center !important;
 }
 
-.ProseMirror h2 {
-  font-size: 1.5em;
-  font-weight: 700;
-  margin: 1em 0 0.5em;
+.ProseMirror p[style*="text-align: right"] {
+  text-align: right !important;
 }
 
-.ProseMirror h3 {
-  font-size: 1.25em;
-  font-weight: 700;
-  margin: 0.8em 0 0.4em;
+.ProseMirror p[style*="text-align: justify"] {
+  text-align: justify !important;
 }
 
+/* Lists (Undo Tailwind CSS Reset) */
 .ProseMirror ul {
-  list-style: disc;
-  padding-left: 1.5em;
-  margin-bottom: 0.75em;
+  list-style-type: disc !important;
+  padding-left: 1.5rem !important;
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.ProseMirror ul ul {
+  list-style-type: circle !important;
+}
+
+.ProseMirror ul ul ul {
+  list-style-type: square !important;
 }
 
 .ProseMirror ol {
-  list-style: decimal;
-  padding-left: 1.5em;
-  margin-bottom: 0.75em;
+  list-style-type: decimal !important;
+  padding-left: 1.5rem !important;
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
 }
 
 .ProseMirror li {
-  margin: 0.2em 0;
+  margin-bottom: 0.25rem;
 }
 
-.ProseMirror img {
-  max-width: 100%;
-  height: auto;
-  border-radius: 2px;
-  cursor: grab;
+.ProseMirror li p {
+  margin: 0 !important;
 }
 
-.ProseMirror img:active {
-  cursor: grabbing;
-}
-
-.ProseMirror table {
-  border-collapse: collapse;
-  width: 100%;
-  margin: 1em 0;
-}
-
-.ProseMirror td,
-.ProseMirror th {
-  border: 1px solid #d0d0d0;
-  padding: 0.5em 0.75em;
-  min-width: 1em;
-}
-
-.ProseMirror th {
-  background: #f5f5f5;
-  font-weight: 700;
-}
-
+/* Blockquotes & Links */
 .ProseMirror blockquote {
   border-left: 3px solid #d0d0d0;
-  padding-left: 1em;
+  padding-left: 1rem;
   color: #666;
-  margin: 1em 0;
+  margin: 1rem 0;
 }
 
 .ProseMirror a {
   color: #2563eb;
   text-decoration: underline;
+  cursor: pointer;
 }
 
-.ProseMirror p.is-editor-empty:first-child::before {
-  content: attr(data-placeholder);
-  float: left;
-  color: #aaa;
-  pointer-events: none;
-  height: 0;
+/* Images */
+.ProseMirror img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 1rem 0;
 }
 
-.ProseMirror .selectedCell::after {
-  background: rgba(37, 99, 235, 0.12);
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
+/* =========================================
+   TABLES & GRID LOGIC
+   ========================================= */
+
+.ProseMirror .tableWrapper {
+  overflow-x: auto;
+  max-width: 100%;
+  margin: 1em 0;
 }
 
-.ProseMirror table .column-resize-handle {
-  background: #2563eb;
-  width: 2px;
-  position: absolute;
-  right: -1px;
-  top: 0;
-  bottom: 0;
-  pointer-events: none;
+.ProseMirror table {
+  border-collapse: collapse;
+  width: 100%;
+  table-layout: auto !important;
+  /* Prevents columns from squishing */
 }
 
-/* Read-only preview mode */
-.ProseMirror[contenteditable="false"] {
-  cursor: default;
+.ProseMirror th,
+.ProseMirror td {
+  padding: 8px 12px;
+  min-width: 60px;
+  vertical-align: top;
+  word-break: break-word;
+  position: relative;
+}
+
+.ProseMirror th {
+  background-color: #f3f4f6;
+  font-weight: bold;
+  text-align: left;
+}
+
+/* Grid Toggle Logic (Controlled by Toolbar button) */
+.show-grid td,
+.show-grid th {
+  border: 1px solid #d1d5db !important;
+}
+
+.hide-grid td,
+.hide-grid th {
+  border: 1px dashed transparent !important;
+}
+
+/* Keep cursor visible in empty cells */
+.ProseMirror td:empty::after,
+.ProseMirror th:empty::after {
+  content: "\200B";
+  display: inline-block;
 }
