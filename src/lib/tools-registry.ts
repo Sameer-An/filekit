@@ -431,9 +431,8 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     icon: 'FileMinus',
     keywords: ['word to pdf', 'docx to pdf', 'convert', 'document'],
     popular: true,
-    maxFileSizeMB: 50,
-    unavailableReason: 'Requires server processing via jsPDF + html2canvas',
-  },
+    maxFileSizeMB: 50
+    },
   {
     id: 'pdf-to-docx',
     title: 'PDF to DOCX',
@@ -441,7 +440,7 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     category: 'document',
     inputFormats: ['pdf'],
     outputFormats: ['docx'],
-    mode: 'browser',
+    mode: 'server',
     status: 'available',
     icon: 'FilePlus',
     keywords: ['pdf to word', 'pdf to docx', 'convert', 'editable'],

@@ -10,9 +10,13 @@ import { ImageToolEngine } from './image-tool-engine';
 import { MediaToolEngine } from './media-tool-engine';
 import { DocumentToolEngine } from './document-tool-engine';
 import { UtilityToolEngine } from './utility-tool-engine';
+import { DirectConvertEngine } from "./direct-convert-engine";
 
 export function ToolPageRouter({ tool }: { tool: ToolDefinition }) {
   const renderEngine = () => {
+      if (tool.id === "docx-to-pdf" || tool.id === "pdf-to-docx") {
+        return <DirectConvertEngine tool={tool} />;
+      }
     switch (tool.category) {
       case 'pdf':
         return <PdfToolEngine tool={tool} />;
