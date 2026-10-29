@@ -30,6 +30,7 @@ import {
   TableRow as DocxTableRow,
   TableCell as DocxTableCell,
   WidthType,
+  type IRunOptions, // Imported for the Mutable type
 } from "docx";
 import { marked } from "marked";
 import {
@@ -212,6 +213,11 @@ async function dataUrlToBytes(
   }
 }
 
+// Mapped type to remove `readonly` modifiers from IRunOptions
+type MutableIRunOptions = {
+  -readonly [K in keyof IRunOptions]: IRunOptions[K];
+};
+
 async function inlineRuns(node: Element): Promise<(TextRun | ImageRun)[]> {
   const runs: (TextRun | ImageRun)[] = [];
   for (const child of Array.from(node.childNodes)) {
@@ -237,19 +243,23 @@ async function inlineRuns(node: Element): Promise<(TextRun | ImageRun)[]> {
         }
         continue;
       }
-      const opts: Record<string, unknown> = { text: el.textContent || "" };
+
+      // Use MutableIRunOptions so we can assign properties without TS errors
+      const opts: MutableIRunOptions = { text: el.textContent || "" };
       let cur: Element | null = el;
       while (cur && cur !== node.parentElement) {
         const t = cur.tagName.toLowerCase();
         if (t === "strong" || t === "b") opts.bold = true;
         if (t === "em" || t === "i") opts.italics = true;
-        if (t === "u") opts.underline = {};
+        // FIX: docx requires an object for underline, not a boolean
+        if (t === "u") opts.underline = { type: "single" };
         if (t === "s" || t === "del" || t === "strike") opts.strike = true;
         if (t === "code") opts.font = "Courier New";
         if (t === "a") opts.color = "2563eb";
         cur = cur.parentElement;
       }
-      if (opts.text) runs.push(new TextRun(opts as any));
+
+      if (opts.text) runs.push(new TextRun(opts));
     }
   }
   return runs;
@@ -346,6 +356,9 @@ const EDITOR_TOOLS = [
   "html-to-pdf",
 ];
 
+type SheetCell = string | number | boolean | null;
+type SheetData = SheetCell[][];
+
 /* ─────────── Main Component ─────────── */
 
 export function DocumentToolEngine({ tool }: { tool: ToolDefinition }) {
@@ -354,17 +367,14 @@ export function DocumentToolEngine({ tool }: { tool: ToolDefinition }) {
   const [editable, setEditable] = useState(true);
   const [importing, setImporting] = useState(false);
   const [wordCount, setWordCount] = useState(0);
-  const [sheetData, setSheetData] = useState<any[][]>([
+
+  const [sheetData, setSheetData] = useState<SheetData>([
     ["Item", "Quantity", "Price", "Total"],
     ["Product A", 10, 25, 250],
     ["Product B", 5, 40, 200],
     ["Product C", 15, 10, 150],
   ]);
 
-  /**
-   * `docx-editor` and `word-editor` are routed to the dedicated full-screen
-   * `/editor` page (paginated Tiptap editor). Everything else edits inline.
-   */
   const isNewTabEditor = NEW_TAB_TOOLS.includes(tool.id);
   const isSheetTool = SHEET_TOOLS.includes(tool.id);
   const useEditorMode = !isNewTabEditor && EDITOR_TOOLS.includes(tool.id);
@@ -372,8 +382,6 @@ export function DocumentToolEngine({ tool }: { tool: ToolDefinition }) {
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
-      // Tiptap v3: StarterKit already bundles Link + Underline,
-      // so disable them here and register our configured versions.
       StarterKit.configure({ link: false, underline: false }),
       Underline,
       TextAlign.configure({ types: ["heading", "paragraph"] }),
@@ -434,8 +442,6 @@ export function DocumentToolEngine({ tool }: { tool: ToolDefinition }) {
     onUpdate: ({ editor }) => setWordCount(countWords(editor.getText())),
   });
 
-  // Tiptap v3 no longer re-renders React on every transaction,
-  // so toolbar state must be subscribed explicitly.
   const ui = useEditorState({
     editor,
     selector: ({ editor }) => ({
@@ -469,9 +475,7 @@ export function DocumentToolEngine({ tool }: { tool: ToolDefinition }) {
     setFiles(selected);
     setImporting(true);
 
-    // ── New-tab flow: docx-editor / word-editor ──
     if (isNewTabEditor) {
-      // Must be opened synchronously (before any await) to avoid popup blockers.
       const newTab = window.open("about:blank", "_blank");
       try {
         setJob(createJob(f.name, f.size));
@@ -502,7 +506,6 @@ export function DocumentToolEngine({ tool }: { tool: ToolDefinition }) {
       return;
     }
 
-    // ── Inline flow ──
     if (!editor && !isSheetTool) {
       setImporting(false);
       return;
@@ -547,13 +550,11 @@ export function DocumentToolEngine({ tool }: { tool: ToolDefinition }) {
       } else if (isSheetTool) {
         const ab = await f.arrayBuffer();
         const wb = XLSX.read(ab, { type: "array" });
-        const json: any[][] = XLSX.utils.sheet_to_json(
-          wb.Sheets[wb.SheetNames[0]],
-          { header: 1 },
-        );
+        const json = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {
+          header: 1,
+        }) as SheetData;
         if (json?.length) setSheetData(json);
       }
-      // File imported — clear the "importing" job card so only the export flow shows.
       setJob(null);
     } catch (err) {
       console.error(err);
@@ -690,7 +691,6 @@ export function DocumentToolEngine({ tool }: { tool: ToolDefinition }) {
           if (!res.ok) throw new Error("PDF export failed");
           outputBlob = await res.blob();
         } catch {
-          // Fallback: browser print dialog ("Save as PDF")
           const win = window.open("", "_blank");
           if (!win)
             throw new Error("Popup blocked — allow popups for PDF export");
@@ -699,7 +699,7 @@ export function DocumentToolEngine({ tool }: { tool: ToolDefinition }) {
           win.focus();
           win.print();
           win.close();
-          setJob(null); // don't leave the panel stuck on "processing"
+          setJob(null);
           return;
         }
         outputFilename = `${baseName(files[0]?.name, "document")}.pdf`;
@@ -709,7 +709,7 @@ export function DocumentToolEngine({ tool }: { tool: ToolDefinition }) {
         });
         outputFilename = `${baseName(files[0]?.name, "document")}.txt`;
       } else if (isSheetTool) {
-        const ws = XLSX.utils.aoa_to_sheet(sheetData);
+        const ws = XLSX.utils.aoa_to_sheet(sheetData as unknown[][]);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
         const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });

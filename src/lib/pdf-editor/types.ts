@@ -39,6 +39,7 @@ export interface PageInfo {
   rotation: 0 | 90 | 180 | 270;
 }
 
+/** The tools available in the ToolRail. */
 export type ToolId =
   | "select"
   | "text"
@@ -55,6 +56,27 @@ export type ToolId =
   | "note"
   | "stamp"
   | "checkmark";
+
+export type FontFamilyId =
+  | "Arial"
+  | "Helvetica"
+  | "Times New Roman"
+  | "Georgia"
+  | "Courier New"
+  | "Verdana"
+  | "Tahoma"
+  | "Trebuchet MS"
+  | "Calibri"
+  | "Cambria"
+  | "Garamond"
+  | "Comic Sans MS"
+  | "Impact"
+  | "Roboto"
+  | "Open Sans"
+  | "Lato"
+  | "Montserrat"
+  | "Poppins"
+  | "Noto Sans";
 
 export interface BaseObject {
   id: string;

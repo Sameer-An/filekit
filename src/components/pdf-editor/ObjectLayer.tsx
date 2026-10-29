@@ -1,7 +1,6 @@
 // src/components/pdf-editor/ObjectLayer.tsx
 "use client";
-
-import React, { useCallback, useRef, useState, useEffect } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { usePdfEditor, usePageObjects } from "@/lib/pdf-editor/store";
 import type {
@@ -10,6 +9,7 @@ import type {
   RectPt,
   TextRunObject,
   NewTextObject,
+  HighlightObject,
 } from "@/lib/pdf-editor/types";
 import { pdfRectToCss, cssRectToPdf, snapPt } from "@/lib/pdf-editor/coords";
 
@@ -20,6 +20,8 @@ interface ObjectLayerProps {
   debug?: boolean;
 }
 
+const DRAG_THRESHOLD = 4; // screen px
+
 export function ObjectLayer({
   pageIndex,
   pageInfo,
@@ -27,47 +29,71 @@ export function ObjectLayer({
   debug = false,
 }: ObjectLayerProps) {
   const objects = usePageObjects(pageIndex);
-
   const {
     selectedIds,
     activeTool,
     gridSnap,
+    editingId,
     selectObjects,
     toggleObjectSelection,
     updateObject,
     addObject,
     selectTool,
+    setEditingId,
+    commit,
   } = usePdfEditor(
     useShallow((s) => ({
       selectedIds: s.selectedIds,
       activeTool: s.activeTool,
       gridSnap: s.grid.snap,
+      editingId: s.editingId,
       selectObjects: s.selectObjects,
       toggleObjectSelection: s.toggleObjectSelection,
       updateObject: s.updateObject,
       addObject: s.addObject,
       selectTool: s.selectTool,
+      setEditingId: s.setEditingId,
+      commit: s.commit,
     })),
   );
 
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const dragRef = useRef<{
-    id: string;
-    mode: "move" | "resize";
-    startX: number;
-    startY: number;
-    startRect: RectPt;
-    handle?: string;
-  } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const selectedSet = new Set(selectedIds);
 
+  /** 本地拖动状态：只在超过阈值后才有值 */
   const [localDrag, setLocalDrag] = useState<{
     id: string;
     rect: RectPt;
   } | null>(null);
 
-  const selectedSet = new Set(selectedIds);
+  /** 拖动候选（尚未超过阈值） */
+  const pendingRef = useRef<{
+    id: string;
+    mode: "move" | "resize";
+    handle?: string;
+    startX: number;
+    startY: number;
+    startRect: RectPt;
+    started: boolean;
+  } | null>(null);
 
+  /** 高亮拖拽矩形（屏幕坐标） */
+  const highlightDragRef = useRef<{
+    startX: number;
+    startY: number;
+    currentX: number;
+    currentY: number;
+    active: boolean;
+  } | null>(null);
+  const [highlightRect, setHighlightRect] = useState<{
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  } | null>(null);
+
+  // 图片上传
   useEffect(() => {
     if (activeTool === "image" && fileInputRef.current) {
       fileInputRef.current.click();
@@ -104,6 +130,7 @@ export function ObjectLayer({
     e.target.value = "";
   };
 
+  /** 在页面上创建新对象 */
   const createNewObjectAt = useCallback(
     (rectPt: RectPt) => {
       const id = `${activeTool}-${crypto.randomUUID()}`;
@@ -122,7 +149,7 @@ export function ObjectLayer({
           obj = {
             ...base,
             kind: "new-text",
-            text: "", // Start empty
+            text: "",
             fontFamily: "Helvetica",
             fontSize: 14,
             bold: false,
@@ -186,30 +213,46 @@ export function ObjectLayer({
         default:
           return;
       }
-
       addObject(obj);
-
-      // Auto-enter edit mode for new text boxes
       if (activeTool === "text") {
-        setTimeout(() => {
-          usePdfEditor.getState().setEditingId(obj!.id);
-        }, 50);
+        setTimeout(() => usePdfEditor.getState().setEditingId(obj!.id), 50);
       }
     },
     [activeTool, pageIndex, pageInfo, objects.length, addObject],
   );
 
+  /** 背景指针按下：选择 / 创建对象 / 高亮拖拽 */
   const onBackgroundPointerDown = useCallback(
     (e: React.PointerEvent) => {
       if (e.target !== e.currentTarget) return;
 
-      if (activeTool !== "select") {
-        if (activeTool === "image") return;
-
+      if (activeTool === "highlight") {
         const root = rootRef.current;
         if (!root) return;
-        const rect = root.getBoundingClientRect();
-        const px = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+        const r = root.getBoundingClientRect();
+        highlightDragRef.current = {
+          startX: e.clientX - r.left,
+          startY: e.clientY - r.top,
+          currentX: e.clientX - r.left,
+          currentY: e.clientY - r.top,
+          active: true,
+        };
+        setHighlightRect({
+          x: e.clientX - r.left,
+          y: e.clientY - r.top,
+          w: 0,
+          h: 0,
+        });
+        root.setPointerCapture(e.pointerId);
+        return;
+      }
+
+      if (activeTool !== "select") {
+        if (activeTool === "image") return;
+        const root = rootRef.current;
+        if (!root) return;
+        const r = root.getBoundingClientRect();
+        const px = { x: e.clientX - r.left, y: e.clientY - r.top };
         const pt = cssRectToPdf(
           { left: px.x, top: px.y, width: 200, height: 40 },
           pageInfo,
@@ -218,12 +261,14 @@ export function ObjectLayer({
         createNewObjectAt(pt);
         return;
       }
+
       selectObjects([]);
     },
     [activeTool, pageInfo, selectObjects, createNewObjectAt],
   );
 
-  const beginDrag = (
+  /** 对象指针按下：准备拖动（尚未开始） */
+  const onObjectPointerDown = (
     e: React.PointerEvent,
     obj: PDFObject,
     mode: "move" | "resize",
@@ -236,67 +281,174 @@ export function ObjectLayer({
       if (e.shiftKey) toggleObjectSelection(obj.id);
       else selectObjects([obj.id]);
     }
-    const root = rootRef.current;
-    if (!root) return;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    dragRef.current = {
+
+    pendingRef.current = {
       id: obj.id,
       mode,
+      handle,
       startX: e.clientX,
       startY: e.clientY,
       startRect: { ...obj.rect },
-      handle,
+      started: false,
     };
   };
 
+  /** 全局指针移动：超过阈值后才真正拖动 */
   const onPointerMove = (e: React.PointerEvent) => {
-    const drag = dragRef.current;
-    if (!drag) return;
-    const storeZoom = usePdfEditor.getState().zoom;
-    const dxPt = (e.clientX - drag.startX) / storeZoom;
-    const dyPt = -(e.clientY - drag.startY) / storeZoom;
+    // 高亮拖拽
+    if (highlightDragRef.current?.active) {
+      const root = rootRef.current;
+      if (!root) return;
+      const r = root.getBoundingClientRect();
+      const x = e.clientX - r.left;
+      const y = e.clientY - r.top;
+      highlightDragRef.current.currentX = x;
+      highlightDragRef.current.currentY = y;
+      const left = Math.min(highlightDragRef.current.startX, x);
+      const top = Math.min(highlightDragRef.current.startY, y);
+      const w = Math.abs(x - highlightDragRef.current.startX);
+      const h = Math.abs(y - highlightDragRef.current.startY);
+      setHighlightRect({ x: left, y: top, w, h });
+      return;
+    }
 
-    let next = { ...drag.startRect };
-    if (drag.mode === "move") {
-      let x = drag.startRect.x + dxPt;
-      let y = drag.startRect.y + dyPt;
-      if (gridSnap) {
+    const pending = pendingRef.current;
+    if (!pending) return;
+
+    if (!pending.started) {
+      const dxScreen = e.clientX - pending.startX;
+      const dyScreen = e.clientY - pending.startY;
+      if (Math.hypot(dxScreen, dyScreen) < DRAG_THRESHOLD) return;
+      pending.started = true;
+      (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    }
+
+    const storeZoom = usePdfEditor.getState().zoom;
+    const dxPt = (e.clientX - pending.startX) / storeZoom;
+    const dyPt = -(e.clientY - pending.startY) / storeZoom;
+    let next = { ...pending.startRect };
+
+    if (pending.mode === "move") {
+      let x = pending.startRect.x + dxPt;
+      let y = pending.startRect.y + dyPt;
+      if (gridSnap && !e.altKey) {
         x = snapPt(x, 4);
         y = snapPt(y, 4);
       }
-      next = { ...drag.startRect, x, y };
-    } else if (drag.mode === "resize") {
-      const h = drag.handle ?? "se";
-      if (h.includes("e")) next.w = Math.max(4, drag.startRect.w + dxPt);
+      next = { ...pending.startRect, x, y };
+    } else {
+      const h = pending.handle ?? "se";
+      if (h.includes("e")) next.w = Math.max(4, pending.startRect.w + dxPt);
       if (h.includes("w")) {
-        next.w = Math.max(4, drag.startRect.w - dxPt);
-        next.x = drag.startRect.x + dxPt;
+        next.w = Math.max(4, pending.startRect.w - dxPt);
+        next.x = pending.startRect.x + dxPt;
       }
-      if (h.includes("s")) next.h = Math.max(4, drag.startRect.h + dyPt);
+      if (h.includes("s")) next.h = Math.max(4, pending.startRect.h + dyPt);
       if (h.includes("n")) {
-        next.h = Math.max(4, drag.startRect.h - dyPt);
-        next.y = drag.startRect.y + dyPt;
+        next.h = Math.max(4, pending.startRect.h - dyPt);
+        next.y = pending.startRect.y + dyPt;
       }
-      if (gridSnap) {
+      if (gridSnap && !e.altKey) {
         next.w = snapPt(next.w, 4);
         next.h = snapPt(next.h, 4);
       }
     }
+
     next = clampRect(next, pageInfo);
-    setLocalDrag({ id: drag.id, rect: next });
+    setLocalDrag({ id: pending.id, rect: next });
   };
 
+  /** 指针抬起：提交拖动 / 完成高亮 */
   const onPointerUp = (e: React.PointerEvent) => {
-    if (dragRef.current) {
-      const drag = dragRef.current;
-      dragRef.current = null;
-      if (localDrag && localDrag.id === drag.id) {
-        updateObject(drag.id, { rect: localDrag.rect });
-        setLocalDrag(null);
+    // 高亮
+    if (highlightDragRef.current?.active) {
+      const drag = highlightDragRef.current;
+      highlightDragRef.current = null;
+      setHighlightRect(null);
+      const root = rootRef.current;
+      if (!root) return;
+      const r = root.getBoundingClientRect();
+      const left = Math.min(drag.startX, drag.currentX);
+      const top = Math.min(drag.startY, drag.currentY);
+      const w = Math.abs(drag.currentX - drag.startX);
+      const h = Math.abs(drag.currentY - drag.startY);
+      if (w < 4 || h < 4) return;
+
+      const cssRect = { left, top, width: w, height: h };
+      const pdfRect = cssRectToPdf(cssRect, pageInfo, 1);
+
+      // 找到与拖拽区域相交的文本行
+      const intersecting = objects.filter((o) => {
+        if (o.kind !== "text-run" || o.deleted) return false;
+        const c = pdfRectToCss(o.rect, pageInfo, 1);
+        return (
+          c.left < cssRect.left + cssRect.width &&
+          c.left + c.width > cssRect.left &&
+          c.top < cssRect.top + cssRect.height &&
+          c.top + c.height > cssRect.top
+        );
+      });
+
+      if (intersecting.length > 0) {
+        // 每行一个高亮
+        commit("Highlight text", (d) => {
+          for (const o of intersecting) {
+            const id = `highlight-${crypto.randomUUID()}`;
+            const hl: HighlightObject = {
+              id,
+              kind: "highlight",
+              page: pageIndex,
+              rect: { ...o.rect },
+              rotation: 0,
+              z: (d.pageObjectIds[pageIndex]?.length ?? 0) + 1,
+              locked: false,
+              opacity: 0.4,
+              color: "#facc15",
+            };
+            d.objects[id] = hl;
+            (d.pageObjectIds[pageIndex] ??= []).push(id);
+          }
+        });
+      } else {
+        // 空拖 → 普通矩形高亮
+        const id = `highlight-${crypto.randomUUID()}`;
+        const hl: HighlightObject = {
+          id,
+          kind: "highlight",
+          page: pageIndex,
+          rect: pdfRect,
+          rotation: 0,
+          z: objects.length,
+          locked: false,
+          opacity: 0.4,
+          color: "#facc15",
+        };
+        addObject(hl);
       }
+      return;
     }
-    (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+
+    // 拖动提交
+    const pending = pendingRef.current;
+    if (pending) {
+      pendingRef.current = null;
+      if (pending.started && localDrag && localDrag.id === pending.id) {
+        updateObject(pending.id, { rect: localDrag.rect });
+      }
+      setLocalDrag(null);
+      try {
+        (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+      } catch {}
+    }
   };
+
+  // 如果工具切换/页面切换，重置 editingId
+  useEffect(() => {
+    return () => {
+      const st = usePdfEditor.getState();
+      if (st.editingId) st.setEditingId(null);
+    };
+  }, []);
 
   return (
     <div
@@ -315,38 +467,24 @@ export function ObjectLayer({
         onChange={handleImageUpload}
       />
 
-      {/* Pass 1: Draw covers for deleted/dirty items */}
-      {objects.map((obj) => {
-        if (
-          (obj.kind === "text-run" || obj.kind === "image-placement") &&
-          (obj.dirty || obj.deleted)
-        ) {
-          const rect = obj.origRect ?? obj.rect;
-          const css = pdfRectToCss(rect, pageInfo, 1);
-          return (
-            <div
-              key={`cover-${obj.id}`}
-              className="absolute pointer-events-none z-0"
-              style={{
-                left: css.left,
-                top: css.top,
-                width: css.width,
-                height: css.height,
-                background:
-                  obj.kind === "text-run"
-                    ? obj.backgroundColor || "#ffffff"
-                    : "#ffffff",
-              }}
-            />
-          );
-        }
-        return null;
-      })}
+      {/* 高亮拖拽预览 */}
+      {highlightRect && (
+        <div
+          className="absolute pointer-events-none z-30"
+          style={{
+            left: highlightRect.x,
+            top: highlightRect.y,
+            width: highlightRect.w,
+            height: highlightRect.h,
+            background: "rgba(250,204,21,0.35)",
+            mixBlendMode: "multiply",
+          }}
+        />
+      )}
 
-      {/* Pass 2: Draw active objects */}
+      {/* 所有对象 */}
       {objects.map((obj) => {
         if (obj.deleted) return null;
-
         const rect =
           localDrag && localDrag.id === obj.id ? localDrag.rect : obj.rect;
         const css = pdfRectToCss(rect, pageInfo, 1);
@@ -364,47 +502,111 @@ export function ObjectLayer({
                 ? `rotate(${obj.rotation}deg)`
                 : undefined,
               transformOrigin: "center",
-              outline: selected ? "2px solid #10b981" : undefined,
-              outlineOffset: selected ? 1 : undefined,
               pointerEvents: "auto",
             }}
-            onPointerDown={(e) => beginDrag(e, obj, "move")}
+            onPointerDown={(e) => onObjectPointerDown(e, obj, "move")}
           >
             <ObjectContent obj={obj} />
-            {selected && (
-              <>
-                {(
-                  [
-                    ["nw", "nwse-resize"],
-                    ["n", "ns-resize"],
-                    ["ne", "nesw-resize"],
-                    ["e", "ew-resize"],
-                    ["se", "nwse-resize"],
-                    ["s", "ns-resize"],
-                    ["sw", "nesw-resize"],
-                    ["w", "ew-resize"],
-                  ] as const
-                ).map(([handle, cursor]) => (
-                  <div
-                    key={handle}
-                    onPointerDown={(e) => beginDrag(e, obj, "resize", handle)}
-                    style={{
-                      position: "absolute",
-                      width: 8,
-                      height: 8,
-                      background: "#10b981",
-                      border: "1px solid white",
-                      cursor,
-                      ...handlePos(handle),
-                    }}
-                  />
-                ))}
-              </>
-            )}
           </div>
         );
       })}
 
+      {/* 选择框和手柄：独立 overlay，始终跟随当前 rect */}
+      {selectedIds.length > 0 && (
+        <>
+          {selectedIds.map((id) => {
+            const obj = objects.find((o) => o.id === id);
+            if (!obj) return null;
+            const rect =
+              localDrag && localDrag.id === id ? localDrag.rect : obj.rect;
+            const css = pdfRectToCss(rect, pageInfo, 1);
+            const border = 2 / zoom; // 屏幕上恒定 2px
+            const handleSize = 8 / zoom;
+            return (
+              <React.Fragment key={`sel-${id}`}>
+                <div
+                  className="absolute pointer-events-none z-20"
+                  style={{
+                    left: css.left,
+                    top: css.top,
+                    width: css.width,
+                    height: css.height,
+                    border: `${border}px solid #10b981`,
+                    boxSizing: "border-box",
+                  }}
+                />
+                {(
+                  [
+                    ["nw", "nwse-resize", -handleSize / 2, -handleSize / 2],
+                    [
+                      "n",
+                      "ns-resize",
+                      css.width / 2 - handleSize / 2,
+                      -handleSize / 2,
+                    ],
+                    [
+                      "ne",
+                      "nesw-resize",
+                      css.width - handleSize / 2,
+                      -handleSize / 2,
+                    ],
+                    [
+                      "e",
+                      "ew-resize",
+                      css.width - handleSize / 2,
+                      css.height / 2 - handleSize / 2,
+                    ],
+                    [
+                      "se",
+                      "nwse-resize",
+                      css.width - handleSize / 2,
+                      css.height - handleSize / 2,
+                    ],
+                    [
+                      "s",
+                      "ns-resize",
+                      css.width / 2 - handleSize / 2,
+                      css.height - handleSize / 2,
+                    ],
+                    [
+                      "sw",
+                      "nesw-resize",
+                      -handleSize / 2,
+                      css.height - handleSize / 2,
+                    ],
+                    [
+                      "w",
+                      "ew-resize",
+                      -handleSize / 2,
+                      css.height / 2 - handleSize / 2,
+                    ],
+                  ] as const
+                ).map(([h, cursor, dx, dy]) => (
+                  <div
+                    key={h}
+                    className="absolute z-30"
+                    onPointerDown={(e) =>
+                      onObjectPointerDown(e, obj, "resize", h)
+                    }
+                    style={{
+                      left: css.left + dx,
+                      top: css.top + dy,
+                      width: handleSize,
+                      height: handleSize,
+                      background: "#10b981",
+                      border: `${1 / zoom}px solid white`,
+                      cursor,
+                      pointerEvents: "auto",
+                    }}
+                  />
+                ))}
+              </React.Fragment>
+            );
+          })}
+        </>
+      )}
+
+      {/* debug 框 */}
       {debug &&
         objects.map((obj) => {
           if (obj.deleted) return null;
@@ -412,7 +614,7 @@ export function ObjectLayer({
           return (
             <div
               key={`debug-${obj.id}`}
-              className="absolute border border-red-500/50 pointer-events-none"
+              className="absolute border border-red-500/50 pointer-events-none z-40"
               style={{
                 left: css.left,
                 top: css.top,
@@ -430,66 +632,13 @@ export function ObjectLayer({
   );
 }
 
-function handlePos(handle: string): React.CSSProperties {
-  const base: React.CSSProperties = {
-    position: "absolute",
-    width: 8,
-    height: 8,
-    background: "#10b981",
-    border: "1px solid white",
-    zIndex: 20,
-  };
-  switch (handle) {
-    case "nw":
-      return { ...base, left: -4, top: -4, cursor: "nwse-resize" };
-    case "n":
-      return {
-        ...base,
-        left: "50%",
-        top: -4,
-        transform: "translateX(-50%)",
-        cursor: "ns-resize",
-      };
-    case "ne":
-      return { ...base, right: -4, top: -4, cursor: "nesw-resize" };
-    case "e":
-      return {
-        ...base,
-        right: -4,
-        top: "50%",
-        transform: "translateY(-50%)",
-        cursor: "ew-resize",
-      };
-    case "se":
-      return { ...base, right: -4, bottom: -4, cursor: "nwse-resize" };
-    case "s":
-      return {
-        ...base,
-        left: "50%",
-        bottom: -4,
-        transform: "translateX(-50%)",
-        cursor: "ns-resize",
-      };
-    case "sw":
-      return { ...base, left: -4, bottom: -4, cursor: "nesw-resize" };
-    case "w":
-      return {
-        ...base,
-        left: -4,
-        top: "50%",
-        transform: "translateY(-50%)",
-        cursor: "ew-resize",
-      };
-    default:
-      return base;
-  }
-}
+/* ───────────── 对象内容渲染 ───────────── */
 
 function ObjectContent({ obj }: { obj: PDFObject }) {
   const updateObject = usePdfEditor((s) => s.updateObject);
   const editingId = usePdfEditor((s) => s.editingId);
   const setEditingId = usePdfEditor((s) => s.setEditingId);
-  const [draft, setDraft] = useState<string>("");
+  const [draft, setDraft] = useState("");
 
   if (obj.kind === "text-run" || obj.kind === "new-text") {
     const isEditing = editingId === obj.id;
@@ -506,7 +655,6 @@ function ObjectContent({ obj }: { obj: PDFObject }) {
             setEditingId(null);
             if (draft !== textObj.text) {
               if (draft.trim() === "" && obj.kind === "new-text") {
-                // Remove empty new text objects on commit
                 usePdfEditor.getState().commit("Remove empty text", (d) => {
                   delete d.objects[obj.id];
                   d.pageObjectIds = d.pageObjectIds.map((ids) =>
@@ -519,6 +667,7 @@ function ObjectContent({ obj }: { obj: PDFObject }) {
             }
           }}
           onKeyDown={(e) => {
+            e.stopPropagation(); // 不让编辑器快捷键收到按键
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               (e.currentTarget as HTMLTextAreaElement).blur();
@@ -528,11 +677,14 @@ function ObjectContent({ obj }: { obj: PDFObject }) {
               setEditingId(null);
             }
           }}
+          onPointerDown={(e) => e.stopPropagation()}
           style={{
             width: "100%",
             height: "100%",
             fontFamily: textObj.fontFamily,
             fontSize: textObj.fontSize,
+            fontWeight: textObj.bold ? 700 : 400,
+            fontStyle: textObj.italic ? "italic" : "normal",
             color: textObj.color,
             background: "rgba(16,185,129,0.12)",
             border: "1px solid #10b981",
@@ -566,6 +718,8 @@ function ObjectContent({ obj }: { obj: PDFObject }) {
           height: "100%",
           fontFamily: textObj.fontFamily,
           fontSize: textObj.fontSize,
+          fontWeight: textObj.bold ? 700 : 400,
+          fontStyle: textObj.italic ? "italic" : "normal",
           color: showText ? textObj.color : "transparent",
           background: "transparent",
           cursor: "text",
@@ -593,11 +747,9 @@ function ObjectContent({ obj }: { obj: PDFObject }) {
   if (obj.kind === "image-placement") {
     const src = obj.replacementDataUrl ?? obj.dataUrl;
     if (!src) return null;
-
     const crop = obj.crop || { l: 0, t: 0, r: 0, b: 0 };
     const cw = 1 - crop.l - crop.r;
     const ch = 1 - crop.t - crop.b;
-
     return (
       <div className="w-full h-full overflow-hidden relative">
         <img
@@ -692,6 +844,7 @@ function ObjectContent({ obj }: { obj: PDFObject }) {
           height: "100%",
           background: obj.color,
           opacity: obj.kind === "highlight" ? obj.opacity * 0.55 : obj.opacity,
+          mixBlendMode: obj.kind === "highlight" ? "multiply" : undefined,
         }}
       />
     );

@@ -1,16 +1,17 @@
 export function canvasToBlob(
   canvas: HTMLCanvasElement,
   mime: string,
-  quality?: number
+  quality?: number,
 ): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (blob) => {
-        if (!blob) reject(new Error('This browser could not encode the image.'));
+        if (!blob)
+          reject(new Error("This browser could not encode the image."));
         else resolve(blob);
       },
       mime,
-      quality
+      quality,
     );
   });
 }
@@ -25,7 +26,7 @@ export async function fileToCanvas(
     flipV?: boolean;
     filter?: string;
     crop?: { x: number; y: number; w: number; h: number };
-  }
+  },
 ): Promise<HTMLCanvasElement> {
   const bmp = await createImageBitmap(file);
   let sx = 0;
@@ -42,12 +43,13 @@ export async function fileToCanvas(
     sh = Math.max(1, Math.min(sh, bmp.height - sy));
   }
 
-  const rotate = ((options?.rotateDeg || 0) % 360 + 360) % 360;
+  const rotate = (((options?.rotateDeg || 0) % 360) + 360) % 360;
   const swap = rotate === 90 || rotate === 270;
   const sourceW = swap ? sh : sw;
   const sourceH = swap ? sw : sh;
   let targetW = options?.width || sourceW;
   let targetH = options?.height || sourceH;
+
   if (options?.width && !options?.height) {
     targetW = options.width;
     targetH = Math.max(1, Math.round((options.width * sourceH) / sourceW));
@@ -56,11 +58,11 @@ export async function fileToCanvas(
     targetW = Math.max(1, Math.round((options.height * sourceW) / sourceH));
   }
 
-  const canvas = document.createElement('canvas');
+  const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(targetW));
   canvas.height = Math.max(1, Math.round(targetH));
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('Canvas is not available in this browser.');
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas is not available in this browser.");
 
   if (options?.filter) ctx.filter = options.filter;
   ctx.translate(canvas.width / 2, canvas.height / 2);
@@ -73,9 +75,12 @@ export async function fileToCanvas(
   return canvas;
 }
 
-export async function fileToJpegBytes(file: File, quality = 0.92): Promise<Uint8Array> {
+export async function fileToJpegBytes(
+  file: File,
+  quality = 0.92,
+): Promise<Uint8Array> {
   const canvas = await fileToCanvas(file);
-  const blob = await canvasToBlob(canvas, 'image/jpeg', quality);
+  const blob = await canvasToBlob(canvas, "image/jpeg", quality);
   return new Uint8Array(await blob.arrayBuffer());
 }
 
@@ -94,5 +99,9 @@ export function pngToIco(png: Uint8Array, size: number): Blob {
   view.setUint16(12, 32, true);
   view.setUint32(14, png.byteLength, true);
   view.setUint32(18, 22, true);
-  return new Blob([header, png], { type: 'image/x-icon' });
+
+  // FIX: TypeScript ko bataya ki ye normal ArrayBuffer hi hai, SharedArrayBuffer nahi
+  return new Blob([header, png as unknown as Uint8Array<ArrayBuffer>], {
+    type: "image/x-icon",
+  });
 }

@@ -90,14 +90,22 @@
             compress: options.compress,
             requestedPassword: null,
         };
+
         const bytes = await exportPdf({
             originalBytes: s.originalBytes,
             pages: s.pages,
             objects: s.objects,
             pageObjectIds: s.pageObjectIds,
             pageOps: s.pageOps,
+            overlays: s.overlays ?? {
+            header: "",
+            footer: "",
+            watermark: "",
+            pageNumbers: false,
+            },
             options: exportOptions,
         });
+
         const blob = new Blob([new Uint8Array(bytes)], {
             type: "application/pdf",
         });

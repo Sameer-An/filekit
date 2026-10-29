@@ -1,23 +1,27 @@
 import StarterKit from "@tiptap/starter-kit";
-import TextStyle from "@tiptap/extension-text-style";
-import Color from "@tiptap/extension-color";
-import FontFamily from "@tiptap/extension-font-family";
-import Underline from "@tiptap/extension-underline";
-import Highlight from "@tiptap/extension-highlight";
-import TextAlign from "@tiptap/extension-text-align";
-import Image from "@tiptap/extension-image";
-import Link from "@tiptap/extension-link";
-import Table from "@tiptap/extension-table";
-import TableRow from "@tiptap/extension-table-row";
-import TableCell from "@tiptap/extension-table-cell";
-import TableHeader from "@tiptap/extension-table-header";
-import TaskList from "@tiptap/extension-task-list";
-import TaskItem from "@tiptap/extension-task-item";
-import Placeholder from "@tiptap/extension-placeholder";
-import CharacterCount from "@tiptap/extension-character-count";
-import Subscript from "@tiptap/extension-subscript";
-import Superscript from "@tiptap/extension-superscript";
-import { Extension } from "@tiptap/core";
+// FIX: Tiptap v3 mein TextStyle named export hai
+import { TextStyle } from "@tiptap/extension-text-style";
+// FIX: Baaki extensions ko bhi named export mein convert kiya
+import { Color } from "@tiptap/extension-color";
+import { FontFamily } from "@tiptap/extension-font-family";
+import { Underline } from "@tiptap/extension-underline";
+import { Highlight } from "@tiptap/extension-highlight";
+import { TextAlign } from "@tiptap/extension-text-align";
+import { Image } from "@tiptap/extension-image";
+import { Link } from "@tiptap/extension-link";
+import {
+  Table,
+  TableRow,
+  TableCell,
+  TableHeader,
+} from "@tiptap/extension-table";
+import { TaskList } from "@tiptap/extension-task-list";
+import { TaskItem } from "@tiptap/extension-task-item";
+import { Placeholder } from "@tiptap/extension-placeholder";
+import { CharacterCount } from "@tiptap/extension-character-count";
+import { Subscript } from "@tiptap/extension-subscript";
+import { Superscript } from "@tiptap/extension-superscript";
+import { Extension, type RawCommands, type CommandProps } from "@tiptap/core";
 
 // Custom FontSize extension (Tiptap doesn't ship one by default)
 export const FontSize = Extension.create({
@@ -32,8 +36,9 @@ export const FontSize = Extension.create({
         attributes: {
           fontSize: {
             default: null,
-            parseHTML: (el) => el.style.fontSize?.replace(/['"]+/g, ""),
-            renderHTML: (attrs) => {
+            parseHTML: (el: HTMLElement) =>
+              el.style.fontSize?.replace(/['"]+/g, ""),
+            renderHTML: (attrs: Record<string, unknown>) => {
               if (!attrs.fontSize) return {};
               return { style: `font-size: ${attrs.fontSize}` };
             },
@@ -46,16 +51,16 @@ export const FontSize = Extension.create({
     return {
       setFontSize:
         (size: string) =>
-        ({ chain }) =>
+        ({ chain }: CommandProps) =>
           chain().setMark("textStyle", { fontSize: size }).run(),
       unsetFontSize:
         () =>
-        ({ chain }) =>
+        ({ chain }: CommandProps) =>
           chain()
             .setMark("textStyle", { fontSize: null })
             .removeEmptyTextStyle()
             .run(),
-    } as any;
+    } as Partial<RawCommands>;
   },
 });
 
@@ -83,5 +88,5 @@ export function buildEditorExtensions() {
     CharacterCount,
     Subscript,
     Superscript,
-    ];
+  ];
 }
