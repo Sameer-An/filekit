@@ -6,6 +6,7 @@ import { ToolDefinition, CATEGORY_LABELS } from '@/lib/tools-registry';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { PdfToolEngine } from './pdf-tool-engine';
+import { PdfEditorLauncher } from './pdf-editor-launcher';
 import { ImageToolEngine } from './image-tool-engine';
 import { MediaToolEngine } from './media-tool-engine';
 import { DocumentToolEngine } from './document-tool-engine';
@@ -16,6 +17,11 @@ export function ToolPageRouter({ tool }: { tool: ToolDefinition }) {
   const renderEngine = () => {
       if (tool.id === "docx-to-pdf" || tool.id === "pdf-to-docx") {
         return <DirectConvertEngine tool={tool} />;
+      }
+      // Route the PDF Editor to its dedicated launcher (opens a new tab
+      // at /pdf-editor). Must run before the generic PdfToolEngine branch.
+      if (tool.id === 'pdf-editor') {
+        return <PdfEditorLauncher tool={tool} />;
       }
     switch (tool.category) {
       case 'pdf':

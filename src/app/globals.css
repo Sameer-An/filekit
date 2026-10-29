@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* @import "tiptap-pagination-plus/dist/style.css"; */
+
 /* Add this only if the gaps are still not visible after Step 1 & 2 */
 /* @import "tiptap-pagination-plus/dist/style.css"; */
 
@@ -137,9 +139,6 @@ body {
 /* Core Editor Setup */
 .ProseMirror {
   outline: none;
-  /* min-height: 1000px; */
-  /* Gives the editor enough height to start scrolling */
-  /* padding-bottom: 50px; */
   white-space: pre-wrap;
   word-wrap: break-word;
 }

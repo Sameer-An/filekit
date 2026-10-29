@@ -51,50 +51,50 @@ import { Button } from "@/components/ui/button";
 
 declare module "@tiptap/core" {
 interface Commands<ReturnType> {
-fontSize: {
+    fontSize: {
     setFontSize: (size: string) => ReturnType;
     unsetFontSize: () => ReturnType;
-};
+    };
 }
 }
 
 const FontSize = Extension.create({
 name: "fontSize",
 addOptions() {
-return { types: ["textStyle"] };
+    return { types: ["textStyle"] };
 },
 addGlobalAttributes() {
-return [
+    return [
     {
-    types: this.options.types,
-    attributes: {
+        types: this.options.types,
+        attributes: {
         fontSize: {
-        default: null,
-        parseHTML: (element: HTMLElement) =>
+            default: null,
+            parseHTML: (element: HTMLElement) =>
             element.style.fontSize?.replace(/['"]+/g, "") || null,
-        renderHTML: (attributes: Record<string, any>) =>
+            renderHTML: (attributes: Record<string, any>) =>
             !attributes.fontSize
-            ? {}
-            : { style: `font-size: ${attributes.fontSize}` },
+                ? {}
+                : { style: `font-size: ${attributes.fontSize}` },
+        },
         },
     },
-    },
-];
+    ];
 },
 addCommands() {
-return {
+    return {
     setFontSize:
-    (size: string) =>
-    ({ chain }: { chain: () => any }) =>
+        (size: string) =>
+        ({ chain }: { chain: () => any }) =>
         chain().setMark("textStyle", { fontSize: size }).run(),
     unsetFontSize:
-    () =>
-    ({ chain }: { chain: () => any }) =>
+        () =>
+        ({ chain }: { chain: () => any }) =>
         chain()
-        .setMark("textStyle", { fontSize: null })
-        .removeEmptyTextStyle()
-        .run(),
-} as any;
+            .setMark("textStyle", { fontSize: null })
+            .removeEmptyTextStyle()
+            .run(),
+    } as any;
 },
 });
 
@@ -102,35 +102,35 @@ return {
 
 const escapeHtml = (s: string) =>
 s.replace(
-/[&<>"']/g,
-(c) =>
+    /[&<>"']/g,
+    (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
-    c
+        c
     ] as string,
 );
 
 const getDocFromDB = (): Promise<{ html: string; filename: string } | null> => {
 return new Promise((resolve, reject) => {
-const request = indexedDB.open("FileKitDocs", 2);
-request.onupgradeneeded = (e) => {
+    const request = indexedDB.open("FileKitDocs", 2);
+    request.onupgradeneeded = (e) => {
     const db = (e.target as IDBOpenDBRequest).result;
     if (!db.objectStoreNames.contains("docs")) db.createObjectStore("docs");
-};
-request.onsuccess = () => {
+    };
+    request.onsuccess = () => {
     const db = request.result;
     if (!db.objectStoreNames.contains("docs")) {
-    db.close();
-    return resolve(null);
+        db.close();
+        return resolve(null);
     }
     const tx = db.transaction("docs", "readonly");
     const getReq = tx.objectStore("docs").get("current");
     getReq.onsuccess = () => {
-    db.close();
-    resolve(getReq.result || null);
+        db.close();
+        resolve(getReq.result || null);
     };
     getReq.onerror = () => reject(getReq.error);
-};
-request.onerror = () => reject(request.error);
+    };
+    request.onerror = () => reject(request.error);
 });
 };
 
@@ -190,8 +190,8 @@ const [showGrid, setShowGrid] = useState(true);
 const fileInputRef = useRef<HTMLInputElement>(null);
 
 const editor = useEditor({
-immediatelyRender: false,
-extensions: [
+    immediatelyRender: false,
+    extensions: [
     // v3: StarterKit bundles Link + Underline → disable, then add configured ones
     StarterKit.configure({ link: false, underline: false }),
     Underline,
@@ -212,49 +212,49 @@ extensions: [
 
     // A4 @ 96dpi = 794 x 1123 px, 1-inch (96px) margins
     PaginationPlus.configure({
-    pageHeight: 1123,
-    pageWidth: 794,
-    marginTop: 96,
-    marginBottom: 96,
-    marginLeft: 96,
-    marginRight: 96,
-    pageGap: 40,
-    pageBreakBackground: "#18181b", // matches bg-zinc-900 canvas
-    footerRight: "{page}",
+        pageHeight: 1056, // A4 height in px
+        pageWidth: 816, // A4 width in px
+        pageMargin: 96, // 1-inch margin
+
+        // 👇 These options make page breaks visible
+        pageGap: 30, // Space between pages in px
+        pageGapBorderSize: 1, // Border thickness for the gap
+        pageGapBorderColor: "#d1d5db", // Clear gray border color
+        pageBreakBackground: "#f3f4f6", // Light gray background for the gap
     }),
-],
-content: "<p></p>",
-editorProps: {
+    ],
+    content: "<p></p>",
+    editorProps: {
     attributes: {
-    class: "focus:outline-none text-gray-900 outline-none w-full",
+        class: "focus:outline-none text-gray-900 outline-none w-full",
     },
-},
+    },
 });
 
 /* Load the document handed off from the tool page (IndexedDB) */
 useEffect(() => {
-if (!editor) return;
-let cancelled = false;
-getDocFromDB()
+    if (!editor) return;
+    let cancelled = false;
+    getDocFromDB()
     .then((data) => {
-    if (cancelled) return;
-    if (data?.html) {
+        if (cancelled) return;
+        if (data?.html) {
         editor.commands.setContent(data.html);
         setFileName(data.filename);
-    }
+        }
     })
     .catch((err) => console.error(err))
     .finally(() => {
-    if (!cancelled) setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
     });
-return () => {
+    return () => {
     cancelled = true;
-};
+    };
 }, [editor]);
 
 const editorState = useEditorState({
-editor,
-selector: (ctx) => ({
+    editor,
+    selector: (ctx) => ({
     canUndo: ctx.editor?.can().undo() ?? false,
     canRedo: ctx.editor?.can().redo() ?? false,
     isBold: ctx.editor?.isActive("bold") ?? false,
@@ -266,386 +266,386 @@ selector: (ctx) => ({
     color: ctx.editor?.getAttributes("textStyle").color ?? "#000000",
     fontFamily: ctx.editor?.getAttributes("textStyle").fontFamily ?? "",
     fontSize: ctx.editor?.getAttributes("textStyle").fontSize ?? "11pt",
-}),
+    }),
 });
 
 /* ─────────── Export (.docx via API, with fallback) ─────────── */
 
 const handleExport = async () => {
-if (!editor) return;
-setIsExporting(true);
-try {
+    if (!editor) return;
+    setIsExporting(true);
+    try {
     const headerHtml = headerText.trim()
-    ? `<p style="color:#6b7280;font-size:9pt;border-bottom:1px solid #d1d5db;padding-bottom:4px;">${escapeHtml(
-        headerText,
+        ? `<p style="color:#6b7280;font-size:9pt;border-bottom:1px solid #d1d5db;padding-bottom:4px;">${escapeHtml(
+            headerText,
         )}</p>`
-    : "";
+        : "";
     const footerHtml = footerText.trim()
-    ? `<p style="color:#6b7280;font-size:9pt;border-top:1px solid #d1d5db;padding-top:4px;">${escapeHtml(
-        footerText,
+        ? `<p style="color:#6b7280;font-size:9pt;border-top:1px solid #d1d5db;padding-top:4px;">${escapeHtml(
+            footerText,
         )}</p>`
-    : "";
+        : "";
     const fullHtml = wrapHtmlForExport(
-    `${headerHtml}${editor.getHTML()}${footerHtml}`,
+        `${headerHtml}${editor.getHTML()}${footerHtml}`,
     );
     const base = fileName.replace(/\.[^/.]+$/, "") || "document";
 
     try {
-    const res = await fetch("/api/docx/export", {
+        const res = await fetch("/api/docx/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ html: fullHtml }),
-    });
-    if (!res.ok) throw new Error("Server export failed");
-    downloadBlob(await res.blob(), `${base}.docx`);
+        });
+        if (!res.ok) throw new Error("Server export failed");
+        downloadBlob(await res.blob(), `${base}.docx`);
     } catch (apiErr) {
-    console.warn("DOCX API failed, using Word-compatible fallback", apiErr);
-    // Word opens HTML saved as .doc
-    downloadBlob(
+        console.warn("DOCX API failed, using Word-compatible fallback", apiErr);
+        // Word opens HTML saved as .doc
+        downloadBlob(
         new Blob(["\ufeff", fullHtml], { type: "application/msword" }),
         `${base}.doc`,
-    );
+        );
     }
-} catch (err) {
+    } catch (err) {
     console.error(err);
     alert("Export failed. Please try again.");
-} finally {
+    } finally {
     setIsExporting(false);
-}
+    }
 };
 
 const handleClose = () => {
-window.close();
-setTimeout(() => {
+    window.close();
+    setTimeout(() => {
     window.location.href = "/tools?q=docx";
-}, 150);
+    }, 150);
 };
 
 const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-const file = e.target.files?.[0];
-if (!file) return;
-const reader = new FileReader();
-reader.onload = () => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
     editor
-    ?.chain()
-    .focus()
-    .setImage({ src: reader.result as string })
-    .run();
-};
-reader.readAsDataURL(file);
-e.target.value = "";
+        ?.chain()
+        .focus()
+        .setImage({ src: reader.result as string })
+        .run();
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
 };
 
 /* Toolbar button that doesn't steal editor focus */
 const tb = (active?: boolean) =>
-`p-1.5 rounded ${active ? "bg-zinc-700" : "hover:bg-zinc-800"} disabled:opacity-40`;
+    `p-1.5 rounded ${active ? "bg-zinc-700" : "hover:bg-zinc-800"} disabled:opacity-40`;
 const keepFocus = (e: React.MouseEvent) => e.preventDefault();
 
 if (isLoading) {
-return (
+    return (
     <div className="h-screen w-full flex items-center justify-center bg-zinc-900 text-white">
-    <Loader2 className="w-8 h-8 animate-spin mr-3" /> Loading Editor...
+        <Loader2 className="w-8 h-8 animate-spin mr-3" /> Loading Editor...
     </div>
-);
+    );
 }
 
 const safeColor = /^#[0-9a-fA-F]{6}$/.test(editorState?.color ?? "")
-? editorState!.color
-: "#000000";
+    ? editorState!.color
+    : "#000000";
 
 return (
-<div className="h-screen w-full flex flex-col bg-zinc-900">
+    <div className="h-screen w-full flex flex-col bg-zinc-900">
     {/* HEADER / TOOLBAR */}
     <div className="flex flex-col shrink-0 sticky top-0 z-10 shadow-md">
-    <div className="flex items-center justify-between p-2 bg-zinc-950 border-b border-zinc-800">
+        <div className="flex items-center justify-between p-2 bg-zinc-950 border-b border-zinc-800">
         <div className="flex items-center gap-4 text-zinc-300">
-        <FileText className="w-5 h-5 text-emerald-500" />
-        <span className="font-medium text-sm">{fileName}</span>
+            <FileText className="w-5 h-5 text-emerald-500" />
+            <span className="font-medium text-sm">{fileName}</span>
         </div>
         <div className="flex items-center gap-2">
-        <Button
+            <Button
             onClick={handleExport}
             size="sm"
             disabled={isExporting}
             className="bg-emerald-600 hover:bg-emerald-700 text-white"
-        >
+            >
             {isExporting ? (
-            <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
             ) : (
-            <Sparkles className="w-4 h-4 mr-2" />
+                <Sparkles className="w-4 h-4 mr-2" />
             )}
             Download .docx
-        </Button>
-        <Button
+            </Button>
+            <Button
             variant="outline"
             size="sm"
             onClick={handleClose}
             className="text-zinc-300 border-zinc-700 hover:bg-zinc-800"
-        >
+            >
             <X className="w-4 h-4 mr-2" /> Close
-        </Button>
+            </Button>
         </div>
-    </div>
+        </div>
 
-    <div className="flex flex-wrap items-center gap-1 p-2 bg-zinc-900 border-b border-zinc-800 text-zinc-300">
+        <div className="flex flex-wrap items-center gap-1 p-2 bg-zinc-900 border-b border-zinc-800 text-zinc-300">
         <button
-        type="button"
-        title="Undo"
-        onMouseDown={keepFocus}
-        disabled={!editorState?.canUndo}
-        onClick={() => editor?.chain().focus().undo().run()}
-        className={tb()}
+            type="button"
+            title="Undo"
+            onMouseDown={keepFocus}
+            disabled={!editorState?.canUndo}
+            onClick={() => editor?.chain().focus().undo().run()}
+            className={tb()}
         >
-        <Undo2 className="w-4 h-4" />
+            <Undo2 className="w-4 h-4" />
         </button>
         <button
-        type="button"
-        title="Redo"
-        onMouseDown={keepFocus}
-        disabled={!editorState?.canRedo}
-        onClick={() => editor?.chain().focus().redo().run()}
-        className={tb()}
+            type="button"
+            title="Redo"
+            onMouseDown={keepFocus}
+            disabled={!editorState?.canRedo}
+            onClick={() => editor?.chain().focus().redo().run()}
+            className={tb()}
         >
-        <Redo2 className="w-4 h-4" />
+            <Redo2 className="w-4 h-4" />
         </button>
         <div className="w-px h-5 bg-zinc-700 mx-1" />
 
         <select
-        value={editorState?.fontFamily}
-        onChange={(e) =>
+            value={editorState?.fontFamily}
+            onChange={(e) =>
             e.target.value
-            ? editor?.chain().focus().setFontFamily(e.target.value).run()
-            : editor?.chain().focus().unsetFontFamily().run()
-        }
-        className="bg-zinc-800 text-xs rounded px-1 py-1 outline-none"
+                ? editor?.chain().focus().setFontFamily(e.target.value).run()
+                : editor?.chain().focus().unsetFontFamily().run()
+            }
+            className="bg-zinc-800 text-xs rounded px-1 py-1 outline-none"
         >
-        <option value="">Default</option>
-        <option value="Arial">Arial</option>
-        <option value="Calibri">Calibri</option>
-        <option value="Times New Roman">Times New Roman</option>
+            <option value="">Default</option>
+            <option value="Arial">Arial</option>
+            <option value="Calibri">Calibri</option>
+            <option value="Times New Roman">Times New Roman</option>
         </select>
 
         <select
-        value={editorState?.fontSize}
-        onChange={(e) =>
+            value={editorState?.fontSize}
+            onChange={(e) =>
             editor?.chain().focus().setFontSize(e.target.value).run()
-        }
-        className="bg-zinc-800 text-xs rounded px-1 py-1 outline-none"
+            }
+            className="bg-zinc-800 text-xs rounded px-1 py-1 outline-none"
         >
-        {FONT_SIZES.map((s) => (
+            {FONT_SIZES.map((s) => (
             <option key={s} value={s}>
-            {s}
+                {s}
             </option>
-        ))}
+            ))}
         </select>
         <div className="w-px h-5 bg-zinc-700 mx-1" />
 
         <button
-        type="button"
-        title="Bold"
-        onMouseDown={keepFocus}
-        onClick={() => editor?.chain().focus().toggleBold().run()}
-        className={tb(editorState?.isBold)}
+            type="button"
+            title="Bold"
+            onMouseDown={keepFocus}
+            onClick={() => editor?.chain().focus().toggleBold().run()}
+            className={tb(editorState?.isBold)}
         >
-        <Bold className="w-4 h-4" />
+            <Bold className="w-4 h-4" />
         </button>
         <button
-        type="button"
-        title="Italic"
-        onMouseDown={keepFocus}
-        onClick={() => editor?.chain().focus().toggleItalic().run()}
-        className={tb(editorState?.isItalic)}
+            type="button"
+            title="Italic"
+            onMouseDown={keepFocus}
+            onClick={() => editor?.chain().focus().toggleItalic().run()}
+            className={tb(editorState?.isItalic)}
         >
-        <Italic className="w-4 h-4" />
+            <Italic className="w-4 h-4" />
         </button>
         <button
-        type="button"
-        title="Underline"
-        onMouseDown={keepFocus}
-        onClick={() => editor?.chain().focus().toggleUnderline().run()}
-        className={tb(editorState?.isUnderline)}
+            type="button"
+            title="Underline"
+            onMouseDown={keepFocus}
+            onClick={() => editor?.chain().focus().toggleUnderline().run()}
+            className={tb(editorState?.isUnderline)}
         >
-        <UnderlineIcon className="w-4 h-4" />
+            <UnderlineIcon className="w-4 h-4" />
         </button>
         <button
-        type="button"
-        title="Strikethrough"
-        onMouseDown={keepFocus}
-        onClick={() => editor?.chain().focus().toggleStrike().run()}
-        className={tb(editorState?.isStrike)}
+            type="button"
+            title="Strikethrough"
+            onMouseDown={keepFocus}
+            onClick={() => editor?.chain().focus().toggleStrike().run()}
+            className={tb(editorState?.isStrike)}
         >
-        <Strikethrough className="w-4 h-4" />
-        </button>
-
-        <div className="w-px h-5 bg-zinc-700 mx-1" />
-        <button
-        type="button"
-        title="Bullet List"
-        onMouseDown={keepFocus}
-        onClick={() => editor?.chain().focus().toggleBulletList().run()}
-        className={tb(editorState?.isBulletList)}
-        >
-        <ListIcon className="w-4 h-4" />
-        </button>
-        <button
-        type="button"
-        title="Numbered List"
-        onMouseDown={keepFocus}
-        onClick={() => editor?.chain().focus().toggleOrderedList().run()}
-        className={tb(editorState?.isOrderedList)}
-        >
-        <ListOrdered className="w-4 h-4" />
+            <Strikethrough className="w-4 h-4" />
         </button>
 
         <div className="w-px h-5 bg-zinc-700 mx-1" />
         <button
-        type="button"
-        title="Align Left"
-        onMouseDown={keepFocus}
-        onClick={() => editor?.chain().focus().setTextAlign("left").run()}
-        className={tb()}
+            type="button"
+            title="Bullet List"
+            onMouseDown={keepFocus}
+            onClick={() => editor?.chain().focus().toggleBulletList().run()}
+            className={tb(editorState?.isBulletList)}
         >
-        <AlignLeft className="w-4 h-4" />
+            <ListIcon className="w-4 h-4" />
         </button>
         <button
-        type="button"
-        title="Align Center"
-        onMouseDown={keepFocus}
-        onClick={() => editor?.chain().focus().setTextAlign("center").run()}
-        className={tb()}
+            type="button"
+            title="Numbered List"
+            onMouseDown={keepFocus}
+            onClick={() => editor?.chain().focus().toggleOrderedList().run()}
+            className={tb(editorState?.isOrderedList)}
         >
-        <AlignCenter className="w-4 h-4" />
+            <ListOrdered className="w-4 h-4" />
+        </button>
+
+        <div className="w-px h-5 bg-zinc-700 mx-1" />
+        <button
+            type="button"
+            title="Align Left"
+            onMouseDown={keepFocus}
+            onClick={() => editor?.chain().focus().setTextAlign("left").run()}
+            className={tb()}
+        >
+            <AlignLeft className="w-4 h-4" />
         </button>
         <button
-        type="button"
-        title="Align Right"
-        onMouseDown={keepFocus}
-        onClick={() => editor?.chain().focus().setTextAlign("right").run()}
-        className={tb()}
+            type="button"
+            title="Align Center"
+            onMouseDown={keepFocus}
+            onClick={() => editor?.chain().focus().setTextAlign("center").run()}
+            className={tb()}
         >
-        <AlignRight className="w-4 h-4" />
+            <AlignCenter className="w-4 h-4" />
         </button>
         <button
-        type="button"
-        title="Justify"
-        onMouseDown={keepFocus}
-        onClick={() =>
+            type="button"
+            title="Align Right"
+            onMouseDown={keepFocus}
+            onClick={() => editor?.chain().focus().setTextAlign("right").run()}
+            className={tb()}
+        >
+            <AlignRight className="w-4 h-4" />
+        </button>
+        <button
+            type="button"
+            title="Justify"
+            onMouseDown={keepFocus}
+            onClick={() =>
             editor?.chain().focus().setTextAlign("justify").run()
-        }
-        className={tb()}
+            }
+            className={tb()}
         >
-        <AlignJustify className="w-4 h-4" />
+            <AlignJustify className="w-4 h-4" />
         </button>
 
         <div className="w-px h-5 bg-zinc-700 mx-1" />
         <label
-        title="Text Color"
-        className="relative p-1.5 hover:bg-zinc-800 rounded cursor-pointer"
+            title="Text Color"
+            className="relative p-1.5 hover:bg-zinc-800 rounded cursor-pointer"
         >
-        <Palette className="w-4 h-4" />
-        <input
+            <Palette className="w-4 h-4" />
+            <input
             type="color"
             className="absolute inset-0 opacity-0 cursor-pointer"
             value={safeColor}
             onChange={(e) =>
-            editor?.chain().focus().setColor(e.target.value).run()
+                editor?.chain().focus().setColor(e.target.value).run()
             }
-        />
+            />
         </label>
         <label
-        title="Highlight"
-        className="relative p-1.5 hover:bg-zinc-800 rounded cursor-pointer"
+            title="Highlight"
+            className="relative p-1.5 hover:bg-zinc-800 rounded cursor-pointer"
         >
-        <Highlighter className="w-4 h-4" />
-        <input
+            <Highlighter className="w-4 h-4" />
+            <input
             type="color"
             className="absolute inset-0 opacity-0 cursor-pointer"
             defaultValue="#fef08a"
             onChange={(e) =>
-            editor
+                editor
                 ?.chain()
                 .focus()
                 .setHighlight({ color: e.target.value })
                 .run()
             }
-        />
+            />
         </label>
 
         <div className="w-px h-5 bg-zinc-700 mx-1" />
         <button
-        type="button"
-        title="Insert Table"
-        onMouseDown={keepFocus}
-        onClick={() =>
+            type="button"
+            title="Insert Table"
+            onMouseDown={keepFocus}
+            onClick={() =>
             editor
-            ?.chain()
-            .focus()
-            .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
-            .run()
-        }
-        className={tb()}
+                ?.chain()
+                .focus()
+                .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+                .run()
+            }
+            className={tb()}
         >
-        <TableIcon className="w-4 h-4" />
+            <TableIcon className="w-4 h-4" />
         </button>
         <button
-        type="button"
-        title="Toggle Table Borders"
-        onMouseDown={keepFocus}
-        onClick={() => setShowGrid((v) => !v)}
-        className={tb(showGrid)}
+            type="button"
+            title="Toggle Table Borders"
+            onMouseDown={keepFocus}
+            onClick={() => setShowGrid((v) => !v)}
+            className={tb(showGrid)}
         >
-        <Grid3X3 className="w-4 h-4" />
+            <Grid3X3 className="w-4 h-4" />
         </button>
         <button
-        type="button"
-        title="Insert Image"
-        onMouseDown={keepFocus}
-        onClick={() => fileInputRef.current?.click()}
-        className={tb()}
+            type="button"
+            title="Insert Image"
+            onMouseDown={keepFocus}
+            onClick={() => fileInputRef.current?.click()}
+            className={tb()}
         >
-        <ImageIcon className="w-4 h-4" />
+            <ImageIcon className="w-4 h-4" />
         </button>
         <input
-        type="file"
-        accept="image/*"
-        ref={fileInputRef}
-        className="hidden"
-        onChange={handleImageUpload}
+            type="file"
+            accept="image/*"
+            ref={fileInputRef}
+            className="hidden"
+            onChange={handleImageUpload}
         />
-    </div>
+        </div>
     </div>
 
     {/* PAGE CANVAS */}
     <div className="flex-1 overflow-y-auto p-8 flex justify-center bg-zinc-900">
-    <div className="w-[794px] shrink-0 flex flex-col">
+        <div className="w-[794px] shrink-0 flex flex-col">
         {/* Document-level header (included once at top of export) */}
         <input
-        type="text"
-        placeholder="Click to add Header"
-        value={headerText}
-        onChange={(e) => setHeaderText(e.target.value)}
-        className="w-full bg-white border border-zinc-700 rounded-t-md p-4 mb-4 text-xs text-gray-500 focus:outline-none placeholder-gray-300"
+            type="text"
+            placeholder="Click to add Header"
+            value={headerText}
+            onChange={(e) => setHeaderText(e.target.value)}
+            className="w-full bg-white border border-zinc-700 rounded-t-md p-4 mb-4 text-xs text-gray-500 focus:outline-none placeholder-gray-300"
         />
 
         {/* Paginated body — grid class lives on this wrapper (CSS uses descendant selectors) */}
         <div
-        className={`shadow-[0_0_20px_rgba(0,0,0,0.5)] ${
+            className={`shadow-[0_0_20px_rgba(0,0,0,0.5)] ${
             showGrid ? "show-grid" : "hide-grid"
-        }`}
+            }`}
         >
-        <EditorContent editor={editor} />
+            <EditorContent editor={editor} />
         </div>
 
         {/* Document-level footer (included once at bottom of export) */}
         <input
-        type="text"
-        placeholder="Click to add Footer"
-        value={footerText}
-        onChange={(e) => setFooterText(e.target.value)}
-        className="w-full bg-white border border-zinc-700 rounded-b-md p-4 mt-4 text-xs text-gray-500 focus:outline-none placeholder-gray-300"
+            type="text"
+            placeholder="Click to add Footer"
+            value={footerText}
+            onChange={(e) => setFooterText(e.target.value)}
+            className="w-full bg-white border border-zinc-700 rounded-b-md p-4 mt-4 text-xs text-gray-500 focus:outline-none placeholder-gray-300"
         />
+        </div>
     </div>
     </div>
-</div>
 );
 }

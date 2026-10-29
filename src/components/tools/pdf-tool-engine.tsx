@@ -142,21 +142,6 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
   };
 }
 
-type AnnotationType = "text" | "highlight" | "rect";
-interface Annotation {
-  id: string;
-  type: AnnotationType;
-  page: number;
-  x: number;
-  y: number;
-  text?: string;
-  size?: number;
-  width?: number;
-  height?: number;
-  color: string;
-}
-type AnnotationDraft = Omit<Annotation, "id">;
-
 const OCR_LANGUAGES = [
   { code: "eng", name: "English" },
   { code: "spa", name: "Spanish" },
@@ -239,20 +224,6 @@ export function PdfToolEngine({ tool }: { tool: ToolDefinition }) {
   /* Protect */
   const [password, setPassword] = useState<string>("");
 
-  /* Editor */
-  const [annotations, setAnnotations] = useState<Annotation[]>([]);
-  const [annotationDraft, setAnnotationDraft] = useState<AnnotationDraft>({
-    type: "text",
-    page: 1,
-    x: 50,
-    y: 50,
-    text: "Note",
-    size: 14,
-    width: 200,
-    height: 40,
-    color: "#dc2626",
-  });
-
   /* Reorder */
   const [pageOrder, setPageOrder] = useState<string>("");
 
@@ -329,19 +300,6 @@ export function PdfToolEngine({ tool }: { tool: ToolDefinition }) {
 
   const removeFile = (index: number) => {
     setFiles((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  /* ───────────── Annotation handlers ───────────── */
-
-  const addAnnotation = () => {
-    if (annotationDraft.type === "text" && !annotationDraft.text?.trim())
-      return;
-    const id = `ann-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    setAnnotations((prev) => [...prev, { ...annotationDraft, id }]);
-  };
-
-  const removeAnnotation = (id: string) => {
-    setAnnotations((prev) => prev.filter((a) => a.id !== id));
   };
 
   /* ───────────── Processing ───────────── */
@@ -903,56 +861,6 @@ export function PdfToolEngine({ tool }: { tool: ToolDefinition }) {
         }
         outputBlob = await res.blob();
         outputName = `protected_${file.name}`;
-      } else if (tool.id === "pdf-editor") {
-
-      /* ─── 14. EDITOR (ANNOTATIONS) ───────────────────────────────── */
-        const buf = await file.arrayBuffer();
-        const doc = await PDFDocument.load(buf, { ignoreEncryption: true });
-        const font = await doc.embedFont(StandardFonts.Helvetica);
-        const pageCount = doc.getPageCount();
-
-        annotations.forEach((ann) => {
-          if (ann.page < 1 || ann.page > pageCount) return;
-          const page = doc.getPage(ann.page - 1);
-          const { r, g, b } = hexToRgb(ann.color);
-          const color = rgb(r, g, b);
-
-          if (ann.type === "text" && ann.text) {
-            page.drawText(ann.text, {
-              x: ann.x,
-              y: ann.y,
-              size: ann.size || 14,
-              font,
-              color,
-            });
-          } else if (ann.type === "highlight") {
-            page.drawRectangle({
-              x: ann.x,
-              y: ann.y,
-              width: ann.width || 100,
-              height: ann.height || 20,
-              color,
-              opacity: 0.4,
-            });
-          } else if (ann.type === "rect") {
-            page.drawRectangle({
-              x: ann.x,
-              y: ann.y,
-              width: ann.width || 100,
-              height: ann.height || 40,
-              borderColor: color,
-              borderWidth: 2,
-              color: rgb(0, 0, 0),
-              opacity: 0,
-            });
-          }
-        });
-
-        outputBlob = uint8ArrayToBlob(
-          await doc.save({ useObjectStreams: true }),
-          "application/pdf",
-        );
-        outputName = `edited_${file.name}`;
       } else {
 
       /* ─── 15. FALLBACK ───────────────────────────────────────────── */
@@ -1721,7 +1629,7 @@ export function PdfToolEngine({ tool }: { tool: ToolDefinition }) {
             </div>
           )}
 
-          {/* ── EDITOR ── */}
+          {/* ── EDITOR ──
           {tool.id === "pdf-editor" && (
             <div className="space-y-4">
               <div className="p-4 rounded-xl border bg-muted/20 space-y-3">
@@ -1945,7 +1853,7 @@ export function PdfToolEngine({ tool }: { tool: ToolDefinition }) {
                 </div>
               )}
             </div>
-          )}
+          )} */}
 
           {/* Main action */}
           <div className="pt-2">
@@ -1986,7 +1894,6 @@ export function PdfToolEngine({ tool }: { tool: ToolDefinition }) {
             setJob(null);
             setExtractedText("");
             setCompressionStats(null);
-            setAnnotations([]);
           }}
         />
       )}
