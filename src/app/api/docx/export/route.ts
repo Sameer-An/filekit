@@ -40,36 +40,12 @@
         },
         });
     } catch (err) {
-        console.error(
-        "LibreOffice export failed, falling back to html-to-docx:",
-        err,
-        );
-
-        // Fallback: html-to-docx npm package
-        try {
-        // FIX 1: Suppress missing type declaration error
-        // @ts-expect-error - html-to-docx does not provide its own type definitions
-        const { default: HTMLtoDOCX } = await import("html-to-docx");
-
-        const buf = await HTMLtoDOCX(html, null, {
-            table: { row: { cantSplit: true } },
-            footer: false,
-            pageNumber: false,
-        });
-
-        // FIX 2: Replaced `any` with proper ArrayBuffer cast to satisfy NextResponse
-        return new NextResponse(buf as unknown as Uint8Array<ArrayBuffer>, {
-            headers: {
-            "Content-Type":
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            },
-        });
-        } catch {
+        // FIX: Removed html-to-docx fallback as requested to clear vulnerabilities
+        console.error("DOCX export failed:", err);
         return NextResponse.json(
-            { error: "DOCX export failed" },
-            { status: 500 },
+        { error: "DOCX export failed. Is LibreOffice installed (SOFFICE_PATH)?" },
+        { status: 500 },
         );
-        }
     } finally {
         try {
         await unlink(htmlPath);

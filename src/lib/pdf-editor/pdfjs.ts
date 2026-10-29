@@ -49,9 +49,6 @@
     // friendly "encrypted PDFs are not supported" message.
     const loadingTask = pdfjs.getDocument({
         data: bytes.slice(0), // copy: pdfjs may detach the buffer
-        // Keep default range behaviour. `disableAutoFetch` would disable
-        // incremental fetch on server-hosted PDFs; we're always local.
-        isEvalSupported: false,
     });
 
     const pdf = await loadingTask.promise;
