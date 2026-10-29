@@ -1,26 +1,29 @@
-import type { NextConfig } from 'next';
+import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Packages that should be treated as server-only (not bundled into the client bundle).
-  serverExternalPackages: ['sharp', 'fluent-ffmpeg', 'archiver', 'pdf-lib'],
-
-  // Empty turbopack config – silences the "webpack config without turbopack config" warning
-  // in Next.js 16 where Turbopack is the default bundler.
+  serverExternalPackages: ["sharp", "fluent-ffmpeg", "archiver", "pdf-lib"],
   turbopack: {},
-
-  // Security headers applied to all routes.
+  webpack: (config) => {
+    // pdfjs tries to require the optional native `canvas` package in Node builds.
+    // We render only in the browser, so alias it out.
+    config.resolve.alias = {
+      ...(config.resolve.alias ?? {}),
+      canvas: false,
+    };
+    return config;
+  },
   async headers() {
     return [
       {
-        source: '/(.*)',
+        source: "/(.*)",
         headers: [
-          { key: 'X-Content-Type-Options', value: 'nosniff' },
-          { key: 'X-Frame-Options', value: 'DENY' },
-          { key: 'X-XSS-Protection', value: '1; mode=block' },
-          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "X-XSS-Protection", value: "1; mode=block" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           {
-            key: 'Permissions-Policy',
-            value: 'camera=(), microphone=(), geolocation=()',
+            key: "Permissions-Policy",
+            value: "camera=(), microphone=(), geolocation=()",
           },
         ],
       },
