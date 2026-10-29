@@ -1,17 +1,8 @@
 // src/components/pdf-editor/ObjectLayer.tsx
-// Renders interactive overlays for each object on a page.
-// Text runs are invisible hit-boxes; only editing shows text.
-// All coordinates are in base PDF points (the parent wrapper scales by zoom).
-// Drags update local state, then commit to the store on pointerup.
-
 "use client";
 
-import React, { useCallback, useRef, useState } from "react";
-import {
-  usePdfEditor,
-  usePageObjects,
-  singleSelectedRect,
-} from "@/lib/pdf-editor/store";
+import React, { useCallback, useRef, useState, useEffect } from "react";
+import { usePdfEditor, usePageObjects } from "@/lib/pdf-editor/store";
 import type {
   PageInfo,
   PDFObject,
@@ -23,7 +14,7 @@ import { pdfRectToCss, cssRectToPdf, snapPt } from "@/lib/pdf-editor/coords";
 interface ObjectLayerProps {
   pageIndex: number;
   pageInfo: PageInfo;
-  zoom: number; // always 1 in the new architecture (parent scales)
+  zoom: number;
   debug?: boolean;
 }
 
@@ -40,11 +31,12 @@ export function ObjectLayer({
   const selectObjects = usePdfEditor((s) => s.selectObjects);
   const toggleObjectSelection = usePdfEditor((s) => s.toggleObjectSelection);
   const updateObject = usePdfEditor((s) => s.updateObject);
-  const updateObjectTransient = usePdfEditor((s) => s.updateObjectTransient);
   const commit = usePdfEditor((s) => s.commit);
   const addObject = usePdfEditor((s) => s.addObject);
+  const selectTool = usePdfEditor((s) => s.selectTool);
 
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<{
     id: string;
     mode: "move" | "resize";
@@ -53,6 +45,7 @@ export function ObjectLayer({
     startRect: RectPt;
     handle?: string;
   } | null>(null);
+
   const [localDrag, setLocalDrag] = useState<{
     id: string;
     rect: RectPt;
@@ -60,10 +53,49 @@ export function ObjectLayer({
 
   const selectedSet = new Set(selectedIds);
 
+  useEffect(() => {
+    if (activeTool === "image" && fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  }, [activeTool]);
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      const img = new Image();
+      img.onload = () => {
+        const id = `new-image-${crypto.randomUUID()}`;
+        const base = {
+          id,
+          page: pageIndex,
+          rect: clampRect(
+            { x: 50, y: 50, w: img.width / 2, h: img.height / 2 },
+            pageInfo,
+          ),
+          rotation: 0,
+          z: objects.length,
+          locked: false,
+          opacity: 1,
+        };
+        addObject({ ...base, kind: "new-image", dataUrl });
+        selectTool("select");
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
   const onBackgroundPointerDown = useCallback(
     (e: React.PointerEvent) => {
       if (e.target !== e.currentTarget) return;
+
       if (activeTool !== "select") {
+        if (activeTool === "image") return;
+
         const root = rootRef.current;
         if (!root) return;
         const rect = root.getBoundingClientRect();
@@ -71,7 +103,7 @@ export function ObjectLayer({
         const pt = cssRectToPdf(
           { left: px.x, top: px.y, width: 200, height: 40 },
           pageInfo,
-          1, // zoom is 1; parent scales
+          1,
         );
         createNewObjectAt(pt);
         return;
@@ -172,7 +204,8 @@ export function ObjectLayer({
   ) => {
     if (obj.locked) return;
     e.stopPropagation();
-    e.preventDefault();
+    // FIX: Removed e.preventDefault() so double-click events fire properly
+
     if (!selectedSet.has(obj.id)) {
       if (e.shiftKey) toggleObjectSelection(obj.id);
       else selectObjects([obj.id]);
@@ -193,16 +226,6 @@ export function ObjectLayer({
   const onPointerMove = (e: React.PointerEvent) => {
     const drag = dragRef.current;
     if (!drag) return;
-    // Convert screen delta to PDF delta. Since the parent is scaled by zoom,
-    // we divide by the *visual* scale. The parent's transform is scale(zoom),
-    // so screen pixels per PDF point = zoom * (container zoom). But inside
-    // this component, we treat zoom as 1 because the parent scales everything.
-    // So the screen delta in CSS pixels is already in "base" coordinates.
-    // However, the parent is scaled, so clientX delta is in screen pixels.
-    // We need to divide by the *effective* scale, which is the zoom of the parent.
-    // We don't have access to the parent zoom here directly, but the caller
-    // passes `zoom` prop. In the new architecture, the parent passes zoom=1
-    // but the wrapper is scaled. So we need the actual zoom from the store.
     const storeZoom = usePdfEditor.getState().zoom;
     const dxPt = (e.clientX - drag.startX) / storeZoom;
     const dyPt = -(e.clientY - drag.startY) / storeZoom;
@@ -242,7 +265,6 @@ export function ObjectLayer({
       const drag = dragRef.current;
       dragRef.current = null;
       if (localDrag && localDrag.id === drag.id) {
-        // Commit the final rect to the store.
         updateObject(drag.id, { rect: localDrag.rect });
         setLocalDrag(null);
       }
@@ -253,16 +275,24 @@ export function ObjectLayer({
   return (
     <div
       ref={rootRef}
-      className="absolute inset-0 z-20" // <--- Added z-20
+      className="absolute inset-0 z-20"
       onPointerDown={onBackgroundPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       style={{ touchAction: "none" }}
     >
+      <input
+        type="file"
+        ref={fileInputRef}
+        className="hidden"
+        accept="image/*"
+        onChange={handleImageUpload}
+      />
+
       {objects.map((obj) => {
         const rect =
           localDrag && localDrag.id === obj.id ? localDrag.rect : obj.rect;
-        const css = pdfRectToCss(rect, pageInfo, 1); // zoom=1, parent scales
+        const css = pdfRectToCss(rect, pageInfo, 1);
         const selected = selectedSet.has(obj.id);
         return (
           <div
@@ -279,8 +309,6 @@ export function ObjectLayer({
               transformOrigin: "center",
               outline: selected ? "2px solid #10b981" : undefined,
               outlineOffset: selected ? 1 : undefined,
-              // For text-run objects, make them invisible hit-boxes.
-              // They should not render visible text.
               pointerEvents: "auto",
             }}
             onPointerDown={(e) => beginDrag(e, obj, "move")}
@@ -319,6 +347,7 @@ export function ObjectLayer({
           </div>
         );
       })}
+
       {debug &&
         objects.map((obj) => {
           const css = pdfRectToCss(obj.rect, pageInfo, 1);
@@ -398,7 +427,6 @@ function handlePos(handle: string): React.CSSProperties {
   }
 }
 
-/** Renders a single object. Text runs are invisible hit-boxes. */
 function ObjectContent({ obj }: { obj: PDFObject }) {
   const updateObject = usePdfEditor((s) => s.updateObject);
   const [editing, setEditing] = useState(false);
@@ -406,8 +434,6 @@ function ObjectContent({ obj }: { obj: PDFObject }) {
 
   if (obj.kind === "text-run") {
     const run = obj as TextRunObject;
-    // Invisible hit-box: no visible text, transparent background.
-    // Only show the textarea when editing.
     return editing ? (
       <textarea
         autoFocus
@@ -415,12 +441,11 @@ function ObjectContent({ obj }: { obj: PDFObject }) {
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => {
           setEditing(false);
-          if (draft !== run.text) {
+          if (draft !== run.text)
             updateObject(run.id, {
               text: draft,
               dirty: true,
             } as Partial<TextRunObject>);
-          }
         }}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) {
@@ -448,19 +473,19 @@ function ObjectContent({ obj }: { obj: PDFObject }) {
       />
     ) : (
       <div
-        onDoubleClick={() => {
+        onDoubleClick={(e) => {
+          e.stopPropagation();
           setDraft(run.text);
           setEditing(true);
         }}
         style={{
           width: "100%",
           height: "100%",
-          // Invisible: no text rendering.
-          // The canvas already shows the original text.
           color: "transparent",
           background: "transparent",
           cursor: "text",
           userSelect: "none",
+          pointerEvents: "auto",
         }}
       />
     );

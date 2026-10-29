@@ -17,8 +17,8 @@ pageIndex: number;
 pageInfo: PageInfo;
 widthPx: number;
 heightPx: number;
-zoom: number; // Visual scale (instant)
-renderZoom: number; // Rasterization scale (debounced)
+zoom: number;
+renderZoom: number;
 showGrid: boolean;
 debug?: boolean;
 }
@@ -42,7 +42,6 @@ const [renderError, setRenderError] = useState<string | null>(null);
 const originalBytes = usePdfEditor((s) => s.originalBytes);
 const commit = usePdfEditor((s) => s.commit);
 
-// Use renderZoom for the actual rendering effect
 useEffect(() => {
     if (!canvasRef.current || !originalBytes) return;
     let cancelled = false;
@@ -55,23 +54,42 @@ useEffect(() => {
         setRenderError(null);
         await getPdfjs();
         const loaded = await getCachedPdf(originalBytes);
-        const page = await getPage(loaded.pdf, pageIndex);
-        if (cancelled) return;
-
-        // Use renderZoom for the internal viewport scale
-        const viewport = page.getViewport({
-        scale: renderZoom * dpr,
-        rotation: pageInfo.rotation,
-        });
 
         const canvas = canvasRef.current;
         if (!canvas) return;
+
+        // FIX: Handle newly duplicated/inserted pages
+        if (pageIndex >= loaded.pdf.numPages) {
+        const scale = (renderZoom || zoom) * dpr;
+        const isRotated =
+            pageInfo.rotation === 90 || pageInfo.rotation === 270;
+        const w = isRotated ? pageInfo.heightPt : pageInfo.widthPt;
+        const h = isRotated ? pageInfo.widthPt : pageInfo.heightPt;
+        canvas.width = w * scale;
+        canvas.height = h * scale;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+        setRenderReady(true);
+        return; // Skip pdfjs extraction for pages that don't exist in original file
+        }
+
+        const page = await getPage(loaded.pdf, pageIndex);
+        if (cancelled) return;
+
+        const viewport = page.getViewport({
+        scale: (renderZoom || zoom) * dpr,
+        rotation: pageInfo.rotation,
+        });
 
         canvas.width = Math.max(1, Math.floor(viewport.width));
         canvas.height = Math.max(1, Math.floor(viewport.height));
 
         const ctx = canvas.getContext("2d", { willReadFrequently: true });
         if (!ctx) throw new Error("Canvas 2D context unavailable.");
+
         ctx.save();
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -87,16 +105,14 @@ useEffect(() => {
 
         if (!cancelled) setRenderReady(true);
 
-        // Extract text runs + images once per page (based on base PDF size)
         const pageKey = `${pageIndex}-${pageInfo.widthPt}-${pageInfo.heightPt}`;
         if (!extracting.has(pageKey)) {
         extracting.add(pageKey);
         try {
-            // Sample using renderZoom for accurate color matching
             const sampler = makeBackgroundSampler(
             canvas,
             pageInfo,
-            renderZoom * dpr,
+            (renderZoom || zoom) * dpr,
             );
             const runs = await extractTextRuns(page, pageInfo, {
             sampleBackground: sampler,
@@ -139,18 +155,21 @@ useEffect(() => {
         task?.cancel();
     } catch {}
     };
-}, [originalBytes, pageIndex, pageInfo, renderZoom, commit]);
+}, [originalBytes, pageIndex, pageInfo, renderZoom, zoom, commit]);
 
 const baseW = pageInfo.widthPt;
 const baseH = pageInfo.heightPt;
+const isRotated = pageInfo.rotation === 90 || pageInfo.rotation === 270;
+const wrapperW = isRotated ? baseH : baseW;
+const wrapperH = isRotated ? baseW : baseH;
 
 return (
     <div
-    className="relative bg-white shadow-[0_0_24px_rgba(0,0,0,0.5)]"
+    className="absolute top-0 left-0 bg-white shadow-[0_0_24px_rgba(0,0,0,0.5)]"
     style={{
-        width: baseW,
-        height: baseH,
-        transform: `scale(${zoom})`, // Instant visual scale
+        width: wrapperW,
+        height: wrapperH,
+        transform: `scale(${zoom})`,
         transformOrigin: "top left",
     }}
     >
@@ -168,11 +187,10 @@ return (
         <div className="absolute inset-0 border-2 border-red-500 pointer-events-none z-[9999]" />
     )}
 
-    {/* Canvas is sized by CSS to match baseW/baseH, but its internal resolution is renderZoom */}
     <canvas
         ref={canvasRef}
         className="absolute inset-0 z-0 select-none"
-        style={{ width: baseW, height: baseH }}
+        style={{ width: wrapperW, height: wrapperH }}
     />
 
     {showGrid && <GridOverlay pageInfo={pageInfo} />}

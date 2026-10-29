@@ -17,7 +17,6 @@ pageInfo: PageInfo;
 export function GridOverlay({ pageInfo }: GridOverlayProps) {
 const grid = usePdfEditor((s) => s.grid);
 
-// Parent scales by zoom. We draw in base PDF points (which act as pixels here).
 const widthPx = pageInfo.widthPt;
 const heightPx = pageInfo.heightPt;
 
@@ -28,20 +27,23 @@ const style: React.CSSProperties = useMemo(() => {
     pointerEvents: "none",
     opacity: grid.opacity,
     mixBlendMode: "multiply",
-    zIndex: 10, // Above canvas (z-0), below objects (z-20)
+    zIndex: 10,
+    // Crucial: Clear any previous background when style changes
+    backgroundImage: "none",
+    backgroundSize: "auto",
+    backgroundPosition: "0 0",
     };
 
     if (isCssPreset(grid.styleId)) {
     const css = gridCssStyle(grid);
     return {
         ...base,
-        backgroundImage: css.backgroundImage,
-        backgroundSize: css.backgroundSize,
-        backgroundPosition: css.backgroundPosition,
+        backgroundImage: css.backgroundImage || "none",
+        backgroundSize: css.backgroundSize || "auto",
+        backgroundPosition: css.backgroundPosition || "0 0",
     };
     }
 
-    // SVG fallback for non-CSS presets
     const svg = getGridPreset(grid.styleId).renderSvg(
     Math.max(1, Math.round(widthPx)),
     Math.max(1, Math.round(heightPx)),
@@ -58,7 +60,6 @@ const style: React.CSSProperties = useMemo(() => {
 return <div className="pdf-grid-overlay" style={style} aria-hidden />;
 }
 
-/** Print stylesheet: hide the grid on print. */
 export function GridPrintStyles() {
 return (
     <style jsx global>{`
