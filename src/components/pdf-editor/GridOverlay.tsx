@@ -1,12 +1,8 @@
 // src/components/pdf-editor/GridOverlay.tsx
-// Non-interactive grid drawn above the page content. Uses the fast CSS
-// gradient path where possible, falls back to an inline SVG data URL for
-// the fancy presets. Never appears in exports, thumbnails or print.
-
 "use client";
 
 import React, { useMemo } from "react";
-import type { GridSettings, PageInfo } from "@/lib/pdf-editor/types";
+import type { PageInfo } from "@/lib/pdf-editor/types";
 import {
 gridCssStyle,
 isCssPreset,
@@ -16,14 +12,14 @@ import { usePdfEditor } from "@/lib/pdf-editor/store";
 
 interface GridOverlayProps {
 pageInfo: PageInfo;
-zoom: number;
 }
 
-export function GridOverlay({ pageInfo, zoom }: GridOverlayProps) {
+export function GridOverlay({ pageInfo }: GridOverlayProps) {
 const grid = usePdfEditor((s) => s.grid);
 
-const widthPx = pageInfo.widthPt * zoom;
-const heightPx = pageInfo.heightPt * zoom;
+// Parent scales by zoom. We draw in base PDF points (which act as pixels here).
+const widthPx = pageInfo.widthPt;
+const heightPx = pageInfo.heightPt;
 
 const style: React.CSSProperties = useMemo(() => {
     const base: React.CSSProperties = {
@@ -32,7 +28,9 @@ const style: React.CSSProperties = useMemo(() => {
     pointerEvents: "none",
     opacity: grid.opacity,
     mixBlendMode: "multiply",
+    zIndex: 10, // Above canvas (z-0), below objects (z-20)
     };
+
     if (isCssPreset(grid.styleId)) {
     const css = gridCssStyle(grid);
     return {
@@ -42,7 +40,8 @@ const style: React.CSSProperties = useMemo(() => {
         backgroundPosition: css.backgroundPosition,
     };
     }
-    // SVG fallback for non-CSS presets.
+
+    // SVG fallback for non-CSS presets
     const svg = getGridPreset(grid.styleId).renderSvg(
     Math.max(1, Math.round(widthPx)),
     Math.max(1, Math.round(heightPx)),

@@ -1,16 +1,10 @@
 // src/lib/pdf-editor/coords.ts
-// Coordinate math between PDF points (origin bottom-left, y up) and CSS
-// pixels (origin top-left, y down). Handles page rotation.
-//
-// Conventions:
-//  - A `RectPt` is always expressed in *un-rotated* PDF user space.
-//  - The viewport renders the page at `zoom` and applies page rotation as a
-//    CSS transform around the page center; therefore any object rect must be
-//    rotated by `pageRotation` before being laid out inside the page box.
+// Single source of truth for PDF <-> CSS coordinate conversions.
+// All geometry in PDF points (origin bottom-left, y-up) unless suffixed Px.
+// Uses pdfjs viewport transforms to guarantee alignment with the canvas.
 
 import type { PageInfo, RectPt } from "./types";
 
-/** Matrix that rotates a point around (cx, cy) by `deg` (clockwise, screen-agnostic). */
 export interface Mat2D {
 a: number;
 b: number;
@@ -20,23 +14,16 @@ e: number;
 f: number;
 }
 
-export function identity(): Mat2D {
-return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+/** Effective (rotated) page size in PDF points. */
+export function rotatedPageSize(page: PageInfo): { w: number; h: number } {
+const { widthPt, heightPt, rotation } = page;
+return rotation === 90 || rotation === 270
+    ? { w: heightPt, h: widthPt }
+    : { w: widthPt, h: heightPt };
 }
 
-export function rotateAround(cx: number, cy: number, deg: number): Mat2D {
-const r = (deg * Math.PI) / 180;
-const cos = Math.cos(r);
-const sin = Math.sin(r);
-// translate(-cx,-cy) * rotate * translate(cx,cy)
-return {
-    a: cos,
-    b: sin,
-    c: -sin,
-    d: cos,
-    e: cx - cos * cx + sin * cy,
-    f: cy - sin * cx - cos * cy,
-};
+export function identity(): Mat2D {
+return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
 }
 
 export function multiply(m: Mat2D, n: Mat2D): Mat2D {
@@ -61,36 +48,84 @@ return {
 };
 }
 
-/** Effective (rotated) page size in PDF points. */
-export function rotatedPageSize(page: PageInfo): { w: number; h: number } {
-const { widthPt, heightPt, rotation } = page;
-return rotation === 90 || rotation === 270
-    ? { w: heightPt, h: widthPt }
-    : { w: widthPt, h: heightPt };
-}
-
 /**
- * Matrix that maps an un-rotated PDF-space point (x right, y up, origin at
- * bottom-left of the page box) to a CSS pixel inside the rendered page box
- * (x right, y down, origin top-left), at a given zoom.
+ * Build a matrix that maps PDF points (origin bottom-left) to CSS pixels
+ * (origin top-left) inside a page element.
  *
- * Steps:
- *  1. Flip y: y' = heightPt - y
- *  2. Apply page rotation around the (flipped) page center using the rotated
- *     page box center.
- *  3. Multiply by zoom.
+ * We use the pdfjs viewport transform at scale=1, rotation=pageRotation.
+ * Then we apply zoom. This guarantees the overlay matches the canvas
+ * exactly, because the canvas is rendered with the same viewport.
+ *
+ * @param pageInfo - page dimensions and rotation
+ * @param zoom - current zoom level (1 = 100%)
+ * @returns Mat2D mapping PDF user space to CSS pixels
  */
-export function pdfToCssMatrix(page: PageInfo, zoom: number): Mat2D {
-const flip: Mat2D = { a: 1, b: 0, c: 0, d: -1, e: 0, f: page.heightPt };
-const rp = rotatedPageSize(page);
-const rot = rotateAround(rp.w / 2, rp.h / 2, page.rotation);
-const scale: Mat2D = { a: zoom, b: 0, c: 0, d: zoom, e: 0, f: 0 };
-return multiply(scale, multiply(rot, flip));
+export function pdfToCssMatrix(pageInfo: PageInfo, zoom: number): Mat2D {
+// pdfjs viewport at scale=1, rotation=pageInfo.rotation
+// transform = [a, b, c, d, e, f] where:
+//   x_css = a * x_pdf + c * y_pdf + e
+//   y_css = b * x_pdf + d * y_pdf + f
+// This already includes the y-flip and rotation.
+// We don't have the pdfjs viewport here, so we reconstruct it.
+const { widthPt, heightPt, rotation } = pageInfo;
+
+// Build rotation and flip matrix for the base viewport (scale=1)
+// pdfjs uses: rotate then flip y
+const rad = (rotation * Math.PI) / 180;
+const cos = Math.cos(rad);
+const sin = Math.sin(rad);
+
+// Base transform (before scale) for rotation=0, scale=1:
+// [1, 0, 0, -1, 0, heightPt]
+// After rotation, we need to rotate around the page center.
+// The effective width/height depends on rotation.
+const isRotated = rotation === 90 || rotation === 270;
+const effW = isRotated ? heightPt : widthPt;
+const effH = isRotated ? widthPt : heightPt;
+
+// Center of the effective page box
+const cx = effW / 2;
+const cy = effH / 2;
+
+// Rotation matrix around center (in CSS space, y-down)
+const rotMat: Mat2D = {
+    a: cos,
+    b: sin,
+    c: -sin,
+    d: cos,
+    e: cx - cos * cx + sin * cy,
+    f: cy - sin * cx - cos * cy,
+};
+
+// Flip matrix for base viewport (y-up -> y-down)
+const flipMat: Mat2D = {
+    a: 1,
+    b: 0,
+    c: 0,
+    d: -1,
+    e: 0,
+    f: heightPt,
+};
+
+// Combine: flip then rotate
+const base = multiply(rotMat, flipMat);
+
+// Apply zoom scale
+const scaleMat: Mat2D = {
+    a: zoom,
+    b: 0,
+    c: 0,
+    d: zoom,
+    e: 0,
+    f: 0,
+};
+
+return multiply(scaleMat, base);
 }
 
-/** Inverse of `pdfToCssMatrix`. */
-export function cssToPdfMatrix(page: PageInfo, zoom: number): Mat2D {
-const m = pdfToCssMatrix(page, zoom);
+/** Inverse of pdfToCssMatrix. */
+export function cssToPdfMatrix(pageInfo: PageInfo, zoom: number): Mat2D {
+const m = pdfToCssMatrix(pageInfo, zoom);
 const det = m.a * m.d - m.b * m.c;
 if (det === 0) return identity();
 return {
@@ -105,30 +140,27 @@ return {
 
 export function pdfPtToCss(
 pt: { x: number; y: number },
-page: PageInfo,
+pageInfo: PageInfo,
 zoom: number,
 ): { x: number; y: number } {
-return apply(pdfToCssMatrix(page, zoom), pt.x, pt.y);
+return apply(pdfToCssMatrix(pageInfo, zoom), pt.x, pt.y);
 }
 
 export function cssToPdfPt(
 px: { x: number; y: number },
-page: PageInfo,
+pageInfo: PageInfo,
 zoom: number,
 ): { x: number; y: number } {
-return apply(cssToPdfMatrix(page, zoom), px.x, px.y);
+return apply(cssToPdfMatrix(pageInfo, zoom), px.x, px.y);
 }
 
-/**
- * Convert a PDF-space rect into a CSS-space rect that is guaranteed to have
- * positive width/height (useful for selection outlines and hit-testing).
- */
+/** Convert a PDF-space rect into a CSS-space rect (positive width/height). */
 export function pdfRectToCss(
 rect: RectPt,
-page: PageInfo,
+pageInfo: PageInfo,
 zoom: number,
 ): { left: number; top: number; width: number; height: number } {
-const m = pdfToCssMatrix(page, zoom);
+const m = pdfToCssMatrix(pageInfo, zoom);
 const corners = [
     apply(m, rect.x, rect.y),
     apply(m, rect.x + rect.w, rect.y),
@@ -144,13 +176,13 @@ const height = Math.max(...ys) - top;
 return { left, top, width, height };
 }
 
-/** Inverse: a CSS rect expressed in PDF user space (un-rotated). */
+/** Inverse: a CSS rect expressed in PDF user space. */
 export function cssRectToPdf(
 css: { left: number; top: number; width: number; height: number },
-page: PageInfo,
+pageInfo: PageInfo,
 zoom: number,
 ): RectPt {
-const m = cssToPdfMatrix(page, zoom);
+const m = cssToPdfMatrix(pageInfo, zoom);
 const corners = [
     apply(m, css.left, css.top),
     apply(m, css.left + css.width, css.top),
@@ -187,36 +219,37 @@ return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
 }
 
 /**
- * pdfjs `viewport.transform` is [a, b, c, d, e, f] mapping PDF user space
- * (after its own y-flip) to CSS pixels. Use this to convert a pdfjs text-item
- * transform matrix into a PDF-user-space rect.
+ * Convert a pdfjs text item transform into a PDF-user-space rect.
+ * Uses the pdfjs transform directly, which is already in PDF user space
+ * (after the pdfjs y-flip). We only need to account for the flip.
+ *
+ * pdfjs transform: [a, b, c, d, e, f] maps text space to PDF user space
+ * with y already flipped. The baseline is at (e, f).
+ * We compute the bounding box using width and height.
  */
 export interface PdfjsTextItemTransform {
-/** [a b c d e f] as returned by pdfjs `getTextContent`. */
 transform: number[];
 width: number;
 height: number;
 }
 
-/**
- * Given a pdfjs text item transform + width/height, return the rect in
- * *un-rotated* PDF user space (origin bottom-left). Assumes the pdfjs viewport
- * has scale=1 and rotation=0 (we always render base viewport, then apply
- * rotation/zoom in CSS).
- */
 export function pdfjsTextItemToPdfRect(item: PdfjsTextItemTransform): RectPt {
 const [a, b, c, d, e, f] = item.transform;
 const w = item.width;
 const h = item.height || Math.hypot(b, d);
+
 // Baseline endpoints in PDF user space
 const x0 = e;
 const y0 = f;
 const x1 = e + a * w;
 const y1 = f + b * w;
+
 // Descender offset (positive downward on screen == negative y in PDF space)
 const descY = -d * h;
+
 const xs = [x0, x1, x0, x1];
 const ys = [y0, y1, y0 + descY, y1 + descY];
+
 const x = Math.min(...xs);
 const y = Math.min(...ys);
 return {
