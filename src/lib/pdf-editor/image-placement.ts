@@ -1,19 +1,13 @@
 // src/lib/pdf-editor/image-placement.ts
-// Extract image placements from a pdfjs page. We use pdfjs's operator list
-// and walk the `paintImage*` operators while tracking the current transform.
-// Each placement becomes an ImagePlacementObject so the editor can select,
-// move, replace or delete it.
 import { pageUid } from "./coords";
 import type { PDFPageProxy } from "pdfjs-dist";
 import type { ImagePlacementObject, PageInfo, RectPt } from "./types";
 
-/** Subset of pdfjs `getOperatorList()` result we consume. */
 interface OpsLike {
 fnArray: number[];
 argsArray: unknown[][];
 }
 
-/** pdfjs OPS enum values we care about. Values are stable in v6. */
 const OPS = {
 save: 10,
 restore: 11,
@@ -24,13 +18,11 @@ paintInlineImageXObject: 85,
 paintSolidColorImageMask: 86,
 };
 
-/** A 2D matrix [a b c d e f] following PDF conventions. */
 type Mat = [number, number, number, number, number, number];
 
 const IDENTITY: Mat = [1, 0, 0, 1, 0, 0];
 
 function matMul(m: Mat, n: Mat): Mat {
-// m * n, standard 2D affine composition.
 return [
     m[0] * n[0] + m[2] * n[1],
     m[1] * n[0] + m[3] * n[1],
@@ -45,7 +37,6 @@ function applyMat(m: Mat, x: number, y: number): [number, number] {
 return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
 }
 
-/** Convert a unit square (0,0)-(1,1) transformed by `m` into a PDF-space rect. */
 function unitSquareToRect(m: Mat): RectPt {
 const corners = [
     applyMat(m, 0, 0),
@@ -62,14 +53,10 @@ return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
 
 function isPlausibleImageRect(rect: RectPt, page: PageInfo): boolean {
 if (rect.w <= 0.5 || rect.h <= 0.5) return false;
-// Allow up to 10× page size; images placed with a huge scaling matrix
-// sometimes overshoot to produce clipping masks. We keep the rect but
-// clamp the display size in the UI.
 if (rect.w > page.widthPt * 10 || rect.h > page.heightPt * 10) return false;
 return true;
 }
 
-/** Decode a pdfjs image object (typed array + kind) to a data URL. */
 async function imageObjectToDataUrl(img: {
 width: number;
 height: number;
@@ -78,15 +65,14 @@ data?: Uint8Array;
 }): Promise<string | null> {
 if (!img?.width || !img?.height || !img?.data) return null;
 const { width, height, kind, data } = img;
-// kind === 1 → GRAYSCALE_1BPP; kind === 2 → RGB_24BPP; kind === 3 → RGBA_32BPP
-// Anything else, we try to interpret as RGBA.
 const expected = kind === 2 ? width * height * 3 : width * height * 4;
 
 let rgba: Uint8ClampedArray | null = null;
+
 if (data.length >= width * height * 4) {
-    rgba = new Uint8ClampedArray(data.buffer, data.byteOffset, expected);
+    rgba = new Uint8ClampedArray(expected);
+    rgba.set(data.subarray(0, expected));
 } else if (kind === 2 || data.length >= width * height * 3) {
-    // Expand RGB → RGBA
     const src = data;
     const out = new Uint8ClampedArray(width * height * 4);
     for (let i = 0, j = 0; i < width * height; i++, j += 3) {
@@ -97,7 +83,6 @@ if (data.length >= width * height * 4) {
     }
     rgba = out;
 } else if (kind === 1) {
-    // 1bpp bitmap; expand
     const out = new Uint8ClampedArray(width * height * 4);
     const bytesPerRow = (width + 7) >> 3;
     for (let y = 0; y < height; y++) {
@@ -116,23 +101,25 @@ if (data.length >= width * height * 4) {
 }
 
 if (!rgba) return null;
-
 if (typeof document === "undefined") return null;
+
 const canvas = document.createElement("canvas");
 canvas.width = width;
 canvas.height = height;
 const ctx = canvas.getContext("2d");
 if (!ctx) return null;
-const imageData = new ImageData(rgba, width, height);
-ctx.putImageData(imageData, 0, 0);
+
 try {
+    // FIX: Use createImageData to avoid the ImageData constructor's strict ArrayBuffer type requirement
+    const imageData = ctx.createImageData(width, height);
+    imageData.data.set(rgba);
+    ctx.putImageData(imageData, 0, 0);
     return canvas.toDataURL("image/png");
 } catch {
     return null;
 }
 }
 
-/** Resolve an image object from pdfjs `page.objs` by name. */
 function resolveImageObject(
 page: PDFPageProxy,
 name: string,
@@ -150,8 +137,7 @@ return new Promise((resolve) => {
     };
     if (objs.has && !objs.has(name)) return resolve(null);
     if (!objs.get) return resolve(null);
-    if (objs.has && !objs.has(name)) return resolve(null);
-    // Some pdfjs versions return synchronously, some via callback.
+
     const maybe = objs.get(name);
     if (maybe && typeof (maybe as { width?: number }).width === "number") {
         resolve(
@@ -164,7 +150,7 @@ return new Promise((resolve) => {
         );
         return;
     }
-    // Async path
+
     try {
         objs.get(name, (v) =>
         resolve(
@@ -185,19 +171,14 @@ return new Promise((resolve) => {
 });
 }
 
-/** Deterministic id per (page, z-index) so re-extraction is stable. */
 function makePlacementId(pageKey: string, z: number): string {
 return `img-${pageKey}-${z}`;
 }
 
-/**
- * Extract all image placements on a page.
- * `pageCanvas` is optional; if provided, we render data URLs for each
- * embedded image so the user sees the original.
- */
 export async function extractImagePlacements(
 page: PDFPageProxy,
 pageInfo: PageInfo,
+sourceCanvas?: HTMLCanvasElement,
 ): Promise<ImagePlacementObject[]> {
 let ops: OpsLike;
 try {
@@ -205,6 +186,7 @@ try {
 } catch {
     return [];
 }
+
 const stack: Mat[] = [IDENTITY.slice() as Mat];
 const out: ImagePlacementObject[] = [];
 const seen = new Set<string>();
@@ -235,9 +217,6 @@ for (let i = 0; i < ops.fnArray.length; i++) {
     fn === OPS.paintInlineImageXObject ||
     fn === OPS.paintImageMaskXObject
     ) {
-    // For paintImageXObject the first arg is a name; for inline/mask it's
-    // the image object itself. Geometry is always the current transform
-    // applied to the unit square.
     const rect = unitSquareToRect(current());
     if (!isPlausibleImageRect(rect, pageInfo)) continue;
 
@@ -261,18 +240,13 @@ for (let i = 0; i < ops.fnArray.length; i++) {
         naturalWidthPt: rect.w,
         naturalHeightPt: rect.h,
     };
-    out.push(obj);
 
-    // Try to resolve the actual pixels (best-effort).
     const first = args[0];
+    let dataUrl: string | null = null;
+
     if (fn === OPS.paintImageXObject && typeof first === "string") {
-        void resolveImageObject(page, first).then(async (img) => {
-        if (!img) return;
-        const dataUrl = await imageObjectToDataUrl(img);
-        if (dataUrl) obj.dataUrl = dataUrl;
-        // `obj` is already in `out`; mutating is fine for the caller
-        // because the store merges by id.
-        });
+        const img = await resolveImageObject(page, first);
+        if (img) dataUrl = await imageObjectToDataUrl(img);
     } else if (
         fn === OPS.paintInlineImageXObject &&
         first &&
@@ -284,21 +258,41 @@ for (let i = 0; i < ops.fnArray.length; i++) {
         data?: Uint8Array;
         kind?: number;
         };
-        const dataUrl = await imageObjectToDataUrl(img);
-        if (dataUrl) obj.dataUrl = dataUrl;
+        dataUrl = await imageObjectToDataUrl(img);
     }
+
+    if (!dataUrl && sourceCanvas) {
+        try {
+        const scale = sourceCanvas.width / pageInfo.widthPt;
+        const off = document.createElement("canvas");
+        off.width = Math.max(1, rect.w * scale);
+        off.height = Math.max(1, rect.h * scale);
+        const ctx = off.getContext("2d");
+        if (ctx) {
+            ctx.drawImage(
+            sourceCanvas,
+            rect.x * scale,
+            (pageInfo.heightPt - rect.y - rect.h) * scale,
+            rect.w * scale,
+            rect.h * scale,
+            0,
+            0,
+            off.width,
+            off.height,
+            );
+            dataUrl = off.toDataURL("image/png");
+        }
+        } catch {}
+    }
+
+    obj.dataUrl = dataUrl;
+    out.push(obj);
     }
 }
 
 return out;
 }
 
-/**
- * Merge freshly-extracted placements with any existing ones.
- * Existing placements keep their edits (position, replacement) if the id
- * matches; new placements are added; deleted placements stay deleted
- * (they don't appear in `fresh`).
- */
 export function reconcileImagePlacements(
 existing: ImagePlacementObject[],
 fresh: ImagePlacementObject[],

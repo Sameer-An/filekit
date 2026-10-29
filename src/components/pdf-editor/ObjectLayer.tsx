@@ -2,12 +2,14 @@
 "use client";
 
 import React, { useCallback, useRef, useState, useEffect } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { usePdfEditor, usePageObjects } from "@/lib/pdf-editor/store";
 import type {
   PageInfo,
   PDFObject,
   RectPt,
   TextRunObject,
+  NewTextObject,
 } from "@/lib/pdf-editor/types";
 import { pdfRectToCss, cssRectToPdf, snapPt } from "@/lib/pdf-editor/coords";
 
@@ -25,15 +27,28 @@ export function ObjectLayer({
   debug = false,
 }: ObjectLayerProps) {
   const objects = usePageObjects(pageIndex);
-  const selectedIds = usePdfEditor((s) => s.selectedIds);
-  const activeTool = usePdfEditor((s) => s.activeTool);
-  const gridSnap = usePdfEditor((s) => s.grid.snap);
-  const selectObjects = usePdfEditor((s) => s.selectObjects);
-  const toggleObjectSelection = usePdfEditor((s) => s.toggleObjectSelection);
-  const updateObject = usePdfEditor((s) => s.updateObject);
-  const commit = usePdfEditor((s) => s.commit);
-  const addObject = usePdfEditor((s) => s.addObject);
-  const selectTool = usePdfEditor((s) => s.selectTool);
+
+  const {
+    selectedIds,
+    activeTool,
+    gridSnap,
+    selectObjects,
+    toggleObjectSelection,
+    updateObject,
+    addObject,
+    selectTool,
+  } = usePdfEditor(
+    useShallow((s) => ({
+      selectedIds: s.selectedIds,
+      activeTool: s.activeTool,
+      gridSnap: s.grid.snap,
+      selectObjects: s.selectObjects,
+      toggleObjectSelection: s.toggleObjectSelection,
+      updateObject: s.updateObject,
+      addObject: s.addObject,
+      selectTool: s.selectTool,
+    })),
+  );
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -89,6 +104,101 @@ export function ObjectLayer({
     e.target.value = "";
   };
 
+  const createNewObjectAt = useCallback(
+    (rectPt: RectPt) => {
+      const id = `${activeTool}-${crypto.randomUUID()}`;
+      const base = {
+        id,
+        page: pageIndex,
+        rect: clampRect(rectPt, pageInfo),
+        rotation: 0,
+        z: objects.length,
+        locked: false,
+        opacity: 1,
+      };
+      let obj: PDFObject | null = null;
+      switch (activeTool) {
+        case "text":
+          obj = {
+            ...base,
+            kind: "new-text",
+            text: "", // Start empty
+            fontFamily: "Helvetica",
+            fontSize: 14,
+            bold: false,
+            italic: false,
+            underline: false,
+            strike: false,
+            color: "#111111",
+            align: "left",
+            lineHeight: 1.2,
+            letterSpacing: 0,
+          };
+          break;
+        case "shape":
+          obj = {
+            ...base,
+            kind: "shape",
+            shape: "rect",
+            stroke: "#111111",
+            fill: null,
+            strokeWidth: 1,
+          };
+          break;
+        case "highlight":
+          obj = { ...base, kind: "highlight", color: "#facc15" };
+          break;
+        case "underline":
+          obj = {
+            ...base,
+            kind: "underline",
+            color: "#111111",
+            strokeWidth: 1.5,
+          };
+          break;
+        case "strike":
+          obj = { ...base, kind: "strike", color: "#111111", strokeWidth: 1.5 };
+          break;
+        case "whiteout":
+          obj = { ...base, kind: "whiteout", color: "#ffffff" };
+          break;
+        case "redact":
+          obj = { ...base, kind: "redact", color: "#000000" };
+          break;
+        case "note":
+          obj = {
+            ...base,
+            kind: "note",
+            author: "You",
+            body: "Note",
+            color: "#fbbf24",
+          };
+          break;
+        case "link":
+          obj = { ...base, kind: "link", href: "https://", color: "#2563eb" };
+          break;
+        case "stamp":
+          obj = { ...base, kind: "stamp", label: "DRAFT", color: "#dc2626" };
+          break;
+        case "checkmark":
+          obj = { ...base, kind: "checkmark", color: "#16a34a" };
+          break;
+        default:
+          return;
+      }
+
+      addObject(obj);
+
+      // Auto-enter edit mode for new text boxes
+      if (activeTool === "text") {
+        setTimeout(() => {
+          usePdfEditor.getState().setEditingId(obj!.id);
+        }, 50);
+      }
+    },
+    [activeTool, pageIndex, pageInfo, objects.length, addObject],
+  );
+
   const onBackgroundPointerDown = useCallback(
     (e: React.PointerEvent) => {
       if (e.target !== e.currentTarget) return;
@@ -110,91 +220,8 @@ export function ObjectLayer({
       }
       selectObjects([]);
     },
-    [activeTool, pageInfo, selectObjects],
+    [activeTool, pageInfo, selectObjects, createNewObjectAt],
   );
-
-  const createNewObjectAt = (rectPt: RectPt) => {
-    const id = `${activeTool}-${crypto.randomUUID()}`;
-    const base = {
-      id,
-      page: pageIndex,
-      rect: clampRect(rectPt, pageInfo),
-      rotation: 0,
-      z: objects.length,
-      locked: false,
-      opacity: 1,
-    };
-    let obj: PDFObject | null = null;
-    switch (activeTool) {
-      case "text":
-        obj = {
-          ...base,
-          kind: "new-text",
-          text: "Double-click to edit",
-          fontFamily: "Helvetica",
-          fontSize: 14,
-          bold: false,
-          italic: false,
-          underline: false,
-          color: "#111111",
-          align: "left",
-          lineHeight: 1.2,
-          letterSpacing: 0,
-        };
-        break;
-      case "shape":
-        obj = {
-          ...base,
-          kind: "shape",
-          shape: "rect",
-          stroke: "#111111",
-          fill: null,
-          strokeWidth: 1,
-        };
-        break;
-      case "highlight":
-        obj = { ...base, kind: "highlight", color: "#facc15" };
-        break;
-      case "underline":
-        obj = {
-          ...base,
-          kind: "underline",
-          color: "#111111",
-          strokeWidth: 1.5,
-        };
-        break;
-      case "strike":
-        obj = { ...base, kind: "strike", color: "#111111", strokeWidth: 1.5 };
-        break;
-      case "whiteout":
-        obj = { ...base, kind: "whiteout", color: "#ffffff" };
-        break;
-      case "redact":
-        obj = { ...base, kind: "redact", color: "#000000" };
-        break;
-      case "note":
-        obj = {
-          ...base,
-          kind: "note",
-          author: "You",
-          body: "Note",
-          color: "#fbbf24",
-        };
-        break;
-      case "link":
-        obj = { ...base, kind: "link", href: "https://", color: "#2563eb" };
-        break;
-      case "stamp":
-        obj = { ...base, kind: "stamp", label: "DRAFT", color: "#dc2626" };
-        break;
-      case "checkmark":
-        obj = { ...base, kind: "checkmark", color: "#16a34a" };
-        break;
-      default:
-        return;
-    }
-    addObject(obj);
-  };
 
   const beginDrag = (
     e: React.PointerEvent,
@@ -202,9 +229,8 @@ export function ObjectLayer({
     mode: "move" | "resize",
     handle?: string,
   ) => {
-    if (obj.locked) return;
+    if (obj.locked || obj.deleted) return;
     e.stopPropagation();
-    // FIX: Removed e.preventDefault() so double-click events fire properly
 
     if (!selectedSet.has(obj.id)) {
       if (e.shiftKey) toggleObjectSelection(obj.id);
@@ -289,7 +315,38 @@ export function ObjectLayer({
         onChange={handleImageUpload}
       />
 
+      {/* Pass 1: Draw covers for deleted/dirty items */}
       {objects.map((obj) => {
+        if (
+          (obj.kind === "text-run" || obj.kind === "image-placement") &&
+          (obj.dirty || obj.deleted)
+        ) {
+          const rect = obj.origRect ?? obj.rect;
+          const css = pdfRectToCss(rect, pageInfo, 1);
+          return (
+            <div
+              key={`cover-${obj.id}`}
+              className="absolute pointer-events-none z-0"
+              style={{
+                left: css.left,
+                top: css.top,
+                width: css.width,
+                height: css.height,
+                background:
+                  obj.kind === "text-run"
+                    ? obj.backgroundColor || "#ffffff"
+                    : "#ffffff",
+              }}
+            />
+          );
+        }
+        return null;
+      })}
+
+      {/* Pass 2: Draw active objects */}
+      {objects.map((obj) => {
+        if (obj.deleted) return null;
+
         const rect =
           localDrag && localDrag.id === obj.id ? localDrag.rect : obj.rect;
         const css = pdfRectToCss(rect, pageInfo, 1);
@@ -297,7 +354,7 @@ export function ObjectLayer({
         return (
           <div
             key={obj.id}
-            className="absolute"
+            className="absolute z-10"
             style={{
               left: css.left,
               top: css.top,
@@ -350,6 +407,7 @@ export function ObjectLayer({
 
       {debug &&
         objects.map((obj) => {
+          if (obj.deleted) return null;
           const css = pdfRectToCss(obj.rect, pageInfo, 1);
           return (
             <div
@@ -379,7 +437,7 @@ function handlePos(handle: string): React.CSSProperties {
     height: 8,
     background: "#10b981",
     border: "1px solid white",
-    zIndex: 2,
+    zIndex: 20,
   };
   switch (handle) {
     case "nw":
@@ -429,83 +487,135 @@ function handlePos(handle: string): React.CSSProperties {
 
 function ObjectContent({ obj }: { obj: PDFObject }) {
   const updateObject = usePdfEditor((s) => s.updateObject);
-  const [editing, setEditing] = useState(false);
+  const editingId = usePdfEditor((s) => s.editingId);
+  const setEditingId = usePdfEditor((s) => s.setEditingId);
   const [draft, setDraft] = useState<string>("");
 
-  if (obj.kind === "text-run") {
-    const run = obj as TextRunObject;
-    return editing ? (
-      <textarea
-        autoFocus
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => {
-          setEditing(false);
-          if (draft !== run.text)
-            updateObject(run.id, {
-              text: draft,
-              dirty: true,
-            } as Partial<TextRunObject>);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            (e.currentTarget as HTMLTextAreaElement).blur();
-          }
-          if (e.key === "Escape") {
-            e.preventDefault();
-            setEditing(false);
-          }
-        }}
-        style={{
-          width: "100%",
-          height: "100%",
-          fontFamily: run.fontFamily,
-          fontSize: run.fontSize,
-          color: run.color,
-          background: "rgba(16,185,129,0.12)",
-          border: "1px solid #10b981",
-          outline: "none",
-          resize: "none",
-          padding: 0,
-          lineHeight: run.lineHeight,
-        }}
-      />
-    ) : (
+  if (obj.kind === "text-run" || obj.kind === "new-text") {
+    const isEditing = editingId === obj.id;
+    const isRun = obj.kind === "text-run";
+    const textObj = obj as TextRunObject | NewTextObject;
+
+    if (isEditing) {
+      return (
+        <textarea
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => {
+            setEditingId(null);
+            if (draft !== textObj.text) {
+              if (draft.trim() === "" && obj.kind === "new-text") {
+                // Remove empty new text objects on commit
+                usePdfEditor.getState().commit("Remove empty text", (d) => {
+                  delete d.objects[obj.id];
+                  d.pageObjectIds = d.pageObjectIds.map((ids) =>
+                    ids.filter((id) => id !== obj.id),
+                  );
+                });
+              } else {
+                updateObject(obj.id, { text: draft } as Partial<PDFObject>);
+              }
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              (e.currentTarget as HTMLTextAreaElement).blur();
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setEditingId(null);
+            }
+          }}
+          style={{
+            width: "100%",
+            height: "100%",
+            fontFamily: textObj.fontFamily,
+            fontSize: textObj.fontSize,
+            color: textObj.color,
+            background: "rgba(16,185,129,0.12)",
+            border: "1px solid #10b981",
+            outline: "none",
+            resize: "none",
+            padding: 0,
+            lineHeight: textObj.lineHeight,
+            textAlign: textObj.align,
+            textDecoration:
+              [
+                textObj.underline ? "underline" : "",
+                textObj.strike ? "line-through" : "",
+              ]
+                .filter(Boolean)
+                .join(" ") || "none",
+          }}
+        />
+      );
+    }
+
+    const showText = isRun ? (obj as TextRunObject).dirty : true;
+    return (
       <div
         onDoubleClick={(e) => {
           e.stopPropagation();
-          setDraft(run.text);
-          setEditing(true);
+          setDraft(textObj.text);
+          setEditingId(obj.id);
         }}
         style={{
           width: "100%",
           height: "100%",
-          color: "transparent",
+          fontFamily: textObj.fontFamily,
+          fontSize: textObj.fontSize,
+          color: showText ? textObj.color : "transparent",
           background: "transparent",
           cursor: "text",
           userSelect: "none",
           pointerEvents: "auto",
+          whiteSpace: "pre-wrap",
+          textAlign: textObj.align,
+          lineHeight: textObj.lineHeight,
+          letterSpacing: textObj.letterSpacing,
+          opacity: textObj.opacity,
+          textDecoration:
+            [
+              textObj.underline ? "underline" : "",
+              textObj.strike ? "line-through" : "",
+            ]
+              .filter(Boolean)
+              .join(" ") || "none",
         }}
-      />
+      >
+        {showText ? textObj.text : ""}
+      </div>
     );
   }
 
   if (obj.kind === "image-placement") {
-    return obj.replacementDataUrl || obj.dataUrl ? (
-      <img
-        src={obj.replacementDataUrl ?? obj.dataUrl ?? ""}
-        alt=""
-        draggable={false}
-        style={{
-          width: "100%",
-          height: "100%",
-          objectFit: "fill",
-          opacity: obj.opacity,
-        }}
-      />
-    ) : (
-      <div className="w-full h-full border border-dashed border-zinc-400/60 bg-zinc-100/40" />
+    const src = obj.replacementDataUrl ?? obj.dataUrl;
+    if (!src) return null;
+
+    const crop = obj.crop || { l: 0, t: 0, r: 0, b: 0 };
+    const cw = 1 - crop.l - crop.r;
+    const ch = 1 - crop.t - crop.b;
+
+    return (
+      <div className="w-full h-full overflow-hidden relative">
+        <img
+          src={src}
+          alt=""
+          draggable={false}
+          style={{
+            position: "absolute",
+            width: `${100 / cw}%`,
+            height: `${100 / ch}%`,
+            left: `${-(crop.l * 100) / cw}%`,
+            top: `${-(crop.t * 100) / ch}%`,
+            objectFit: "fill",
+            opacity: obj.opacity,
+            maxWidth: "none",
+          }}
+        />
+      </div>
     );
   }
 

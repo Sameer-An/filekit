@@ -1,233 +1,110 @@
-// src/components/pdf-editor/TextProperties.tsx
-// Font + paragraph formatting controls. Shown inside PropertiesPanel when the
-// selection is a text-bearing object (new-text, text-run, note).
+    "use client";
 
-"use client";
+    import React from "react";
+    import { usePdfEditor } from "@/lib/pdf-editor/store";
+    import type {
+    TextRunObject,
+    NewTextObject,
+    PDFObject,
+    } from "@/lib/pdf-editor/types";
 
-import React from "react";
-import {
-Bold,
-Italic,
-Underline as UnderlineIcon,
-AlignLeft,
-AlignCenter,
-AlignRight,
-AlignJustify,
-} from "lucide-react";
-import type {
-NewTextObject,
-TextRunObject,
-NoteObject,
-} from "@/lib/pdf-editor/types";
+    export function TextProperties() {
+    const selectedIds = usePdfEditor((s) => s.selectedIds);
+    const objects = usePdfEditor((s) => s.objects);
+    const updateObject = usePdfEditor((s) => s.updateObject);
 
-type TextLike = NewTextObject | TextRunObject | NoteObject;
+    if (selectedIds.length !== 1) return null;
+    const obj = objects[selectedIds[0]];
 
-interface TextPropertiesProps {
-obj: TextLike;
-onChange: (patch: Partial<TextLike>) => void;
-}
+    // Only show this panel for text objects
+    if (!obj || (obj.kind !== "text-run" && obj.kind !== "new-text")) return null;
 
-const FONTS = [
-"Helvetica",
-"Times-Roman",
-"Courier",
-"Arial",
-"Georgia",
-"Verdana",
-"Calibri",
-"Cambria",
-];
+    const text = obj as TextRunObject | NewTextObject;
 
-const SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48, 64];
+    // Fix: Replaced `any` with a proper Partial type
+    const update = (patch: Partial<PDFObject>) => {
+        updateObject(obj.id, patch);
+    };
 
-export function TextProperties({ obj, onChange }: TextPropertiesProps) {
-const isNote = obj.kind === "note";
-if (isNote) return null;
-
-const text = obj as NewTextObject | TextRunObject;
-return (
-    <div className="space-y-3">
-    <div className="grid grid-cols-2 gap-2">
-        <label className="space-y-1">
-        <span className="text-[10px] uppercase tracking-wide text-zinc-500">
+    return (
+        <div className="space-y-4 text-xs text-zinc-300 p-2">
+        <div className="space-y-1">
+            <label className="text-[10px] uppercase tracking-wide text-zinc-500">
             Font
-        </span>
-        <select
+            </label>
+            <select
             value={text.fontFamily}
-            onChange={(e) =>
-            onChange({ fontFamily: e.target.value } as Partial<TextLike>)
-            }
-            className="w-full bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-xs"
-        >
-            {FONTS.map((f) => (
-            <option key={f} value={f}>
-                {f}
-            </option>
-            ))}
-        </select>
-        </label>
-        <label className="space-y-1">
-        <span className="text-[10px] uppercase tracking-wide text-zinc-500">
-            Size
-        </span>
-        <select
-            value={String(Math.round(text.fontSize))}
-            onChange={(e) =>
-            onChange({
-                fontSize: parseFloat(e.target.value),
-            } as Partial<TextLike>)
-            }
-            className="w-full bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-xs"
-        >
-            {SIZES.map((s) => (
-            <option key={s} value={s}>
-                {s} pt
-            </option>
-            ))}
-        </select>
-        </label>
-    </div>
+            onChange={(e) => update({ fontFamily: e.target.value })}
+            className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1"
+            >
+            <option value="Helvetica">Helvetica</option>
+            <option value="Times New Roman">Times New Roman</option>
+            <option value="Courier New">Courier New</option>
+            <option value="Arial">Arial</option>
+            </select>
+        </div>
 
-    <div className="flex items-center gap-0.5">
-        <Toggle
-        active={text.bold}
-        onClick={() => onChange({ bold: !text.bold } as Partial<TextLike>)}
-        title="Bold"
-        >
-        <Bold className="w-4 h-4" />
-        </Toggle>
-        <Toggle
-        active={text.italic}
-        onClick={() =>
-            onChange({ italic: !text.italic } as Partial<TextLike>)
-        }
-        title="Italic"
-        >
-        <Italic className="w-4 h-4" />
-        </Toggle>
-        <Toggle
-        active={text.underline}
-        onClick={() =>
-            onChange({ underline: !text.underline } as Partial<TextLike>)
-        }
-        title="Underline"
-        >
-        <UnderlineIcon className="w-4 h-4" />
-        </Toggle>
-        <div className="w-px h-5 bg-zinc-800 mx-1" />
-        <Toggle
-        active={text.align === "left"}
-        onClick={() => onChange({ align: "left" } as Partial<TextLike>)}
-        title="Align left"
-        >
-        <AlignLeft className="w-4 h-4" />
-        </Toggle>
-        <Toggle
-        active={text.align === "center"}
-        onClick={() => onChange({ align: "center" } as Partial<TextLike>)}
-        title="Align center"
-        >
-        <AlignCenter className="w-4 h-4" />
-        </Toggle>
-        <Toggle
-        active={text.align === "right"}
-        onClick={() => onChange({ align: "right" } as Partial<TextLike>)}
-        title="Align right"
-        >
-        <AlignRight className="w-4 h-4" />
-        </Toggle>
-        <Toggle
-        active={text.align === "justify"}
-        onClick={() => onChange({ align: "justify" } as Partial<TextLike>)}
-        title="Justify"
-        >
-        <AlignJustify className="w-4 h-4" />
-        </Toggle>
-    </div>
+        <div className="flex items-center gap-2">
+            <button
+            onClick={() => update({ bold: !text.bold })}
+            className={`px-2 py-1 rounded border ${
+                text.bold ? "bg-emerald-600 border-emerald-500" : "border-zinc-700"
+            }`}
+            >
+            B
+            </button>
+            <button
+            onClick={() => update({ italic: !text.italic })}
+            className={`px-2 py-1 rounded border italic ${
+                text.italic
+                ? "bg-emerald-600 border-emerald-500"
+                : "border-zinc-700"
+            }`}
+            >
+            I
+            </button>
+            <button
+            onClick={() => update({ underline: !text.underline })}
+            className={`px-2 py-1 rounded border underline ${
+                text.underline
+                ? "bg-emerald-600 border-emerald-500"
+                : "border-zinc-700"
+            }`}
+            >
+            U
+            </button>
 
-    <div className="grid grid-cols-3 gap-2">
-        <label className="space-y-1">
-        <span className="text-[10px] uppercase tracking-wide text-zinc-500">
-            Color
-        </span>
-        <input
+            {/* Fix: Removed `isRun` check and `as any` cast because `strike` now exists on both text types */}
+            <button
+            onClick={() => update({ strike: !text.strike })}
+            className={`px-2 py-1 rounded border line-through ${
+                text.strike
+                ? "bg-emerald-600 border-emerald-500"
+                : "border-zinc-700"
+            }`}
+            >
+            S
+            </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+            <input
+            type="number"
+            value={text.fontSize}
+            onChange={(e) =>
+                update({ fontSize: parseFloat(e.target.value) || 12 })
+            }
+            className="w-16 bg-zinc-900 border border-zinc-700 rounded px-2 py-1"
+            title="Font Size"
+            />
+            <input
             type="color"
             value={text.color}
-            onChange={(e) =>
-            onChange({ color: e.target.value } as Partial<TextLike>)
-            }
-            className="w-full h-7 rounded border border-zinc-700 bg-transparent cursor-pointer"
-        />
-        </label>
-        <label className="space-y-1">
-        <span className="text-[10px] uppercase tracking-wide text-zinc-500">
-            Line height
-        </span>
-        <input
-            type="number"
-            step={0.1}
-            min={0.8}
-            max={3}
-            value={text.lineHeight}
-            onChange={(e) =>
-            onChange({
-                lineHeight: Math.max(0.8, parseFloat(e.target.value) || 1.2),
-            } as Partial<TextLike>)
-            }
-            className="w-full bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-xs"
-        />
-        </label>
-        <label className="space-y-1">
-        <span className="text-[10px] uppercase tracking-wide text-zinc-500">
-            Letter spacing
-        </span>
-        <input
-            type="number"
-            step={0.1}
-            min={-2}
-            max={20}
-            value={text.letterSpacing}
-            onChange={(e) =>
-            onChange({
-                letterSpacing: parseFloat(e.target.value) || 0,
-            } as Partial<TextLike>)
-            }
-            className="w-full bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-xs"
-        />
-        </label>
-    </div>
-
-    {obj.kind === "text-run" && obj.substituted && (
-        <div className="text-[10px] px-2 py-1 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300">
-        Font substituted on export ({obj.sourceFontName || "unknown"} → Noto
-        Sans)
+            onChange={(e) => update({ color: e.target.value })}
+            className="w-8 h-8 rounded border border-zinc-700 bg-transparent cursor-pointer"
+            title="Text Color"
+            />
         </div>
-    )}
-    </div>
-);
-}
-
-function Toggle({
-active,
-onClick,
-title,
-children,
-}: {
-active: boolean;
-onClick: () => void;
-title: string;
-children: React.ReactNode;
-}) {
-return (
-    <button
-    type="button"
-    onClick={onClick}
-    title={title}
-    className={`p-1.5 rounded ${
-        active ? "bg-emerald-600 text-white" : "hover:bg-zinc-800 text-zinc-300"
-    }`}
-    >
-    {children}
-    </button>
-);
-}
+        </div>
+    );
+    }

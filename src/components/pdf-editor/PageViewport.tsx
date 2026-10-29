@@ -31,12 +31,48 @@ export function PageViewport() {
   const [view, setView] = useState({ w: 0, h: 800 });
   const [scrollTop, setScrollTop] = useState(0);
   const [renderZoom, setRenderZoom] = useState(zoom);
-  const [debugMode, setDebugMode] = useState(false);
+
+  // Lazy initialization avoids setState in effect
+  const [debugMode] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return new URLSearchParams(window.location.search).get("debug") === "1";
+  });
+
   const anchorRef = useRef({ page: 0, frac: 0 });
   const lastZoomRef = useRef(zoom);
 
+  // Keyboard shortcuts
   useEffect(() => {
-    setDebugMode(new URLSearchParams(window.location.search).get("debug") === "1");
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.isContentEditable)
+      )
+        return;
+      const st = usePdfEditor.getState();
+      const mod = e.ctrlKey || e.metaKey;
+      if (e.key === "Delete" || e.key === "Backspace") {
+        if (st.selectedIds.length) {
+          e.preventDefault();
+          st.deleteSelected();
+        }
+      } else if (e.key === "Escape") {
+        st.selectObjects([]);
+        st.selectTool("select");
+      } else if (mod && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) st.redo();
+        else st.undo();
+      } else if (mod && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        st.redo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   // Debounce the expensive re-rasterisation; CSS scale is instant.
@@ -51,6 +87,7 @@ export function PageViewport() {
     const el = scrollRef.current;
     if (!el) return;
     const measure = () => setView({ w: el.clientWidth, h: el.clientHeight });
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
@@ -88,6 +125,7 @@ export function PageViewport() {
     const cw = view.w - PAD_X * 2;
     const ch = view.h - PAD_Y * 2;
     const target = fitMode === "width" ? cw / w : Math.min(cw / w, ch / h);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (Number.isFinite(target) && target > 0) setZoom(target, true);
   }, [fitMode, pages, currentPage, view.w, view.h, setZoom]);
 
@@ -101,9 +139,13 @@ export function PageViewport() {
     el.scrollTop = layout.tops[page] + frac * layout.heights[page];
   }, [zoom, layout]);
 
-  // Track the page under the top third of the viewport (rAF throttled).
+  // Update ref inside useEffect to prevent React 19 render-phase mutation error
   const layoutRef = useRef(layout);
-  layoutRef.current = layout;
+  useEffect(() => {
+    layoutRef.current = layout;
+  }, [layout]);
+
+  // Track the page under the top third of the viewport (rAF throttled).
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || pages.length === 0) return;

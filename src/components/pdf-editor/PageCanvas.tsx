@@ -13,6 +13,7 @@ import { pageUid, rotatedPageSize } from "@/lib/pdf-editor/coords";
 import type { PageInfo } from "@/lib/pdf-editor/types";
 import { ObjectLayer } from "./ObjectLayer";
 import { GridOverlay } from "./GridOverlay";
+import { PageOverlayPreview } from "./PageOverlayPreview";
 
 interface PageCanvasProps {
   pageIndex: number;
@@ -41,7 +42,9 @@ function PageCanvasImpl({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [renderReady, setRenderReady] = useState(false);
   const [renderError, setRenderError] = useState<string | null>(null);
+
   const originalBytes = usePdfEditor((s) => s.originalBytes);
+  const totalPages = usePdfEditor((s) => s.numPages);
 
   useEffect(() => {
     if (!originalBytes) return;
@@ -51,7 +54,10 @@ function PageCanvasImpl({
     const { w: wPt, h: hPt } = rotatedPageSize(pageInfo);
 
     /** Extract text runs + images once per page instance (never via commit). */
-    const extractOnce = async (pdfPage: PDFPageProxy, source: HTMLCanvasElement) => {
+    const extractOnce = async (
+      pdfPage: PDFPageProxy,
+      source: HTMLCanvasElement,
+    ) => {
       const uid = pageUid(pageInfo);
       if (isPageExtracted(uid) || extracting.has(uid)) return;
       const st = usePdfEditor.getState();
@@ -74,13 +80,24 @@ function PageCanvasImpl({
         sample
           .getContext("2d", { willReadFrequently: true })
           ?.drawImage(source, 0, 0, sample.width, sample.height);
+
         const sampler = makeBackgroundSampler(sample, pageInfo, 1);
+
         const runs = await extractTextRuns(pdfPage, pageInfo, {
           sampleBackground: sampler,
         });
-        const placements = await extractImagePlacements(pdfPage, pageInfo);
+
+        // Pass the `source` canvas so moving an image extracts its pixels directly from the rendered page
+        const placements = await extractImagePlacements(
+          pdfPage,
+          pageInfo,
+          source,
+        );
+
         // images first => they sit below the text runs
-        usePdfEditor.getState().addExtracted(idx, uid, [...placements, ...runs]);
+        usePdfEditor
+          .getState()
+          .addExtracted(idx, uid, [...placements, ...runs]);
       } catch (err) {
         console.warn("[PageCanvas] extraction failed", err);
       } finally {
@@ -127,11 +144,15 @@ function PageCanvasImpl({
           if (!octx) throw new Error("Canvas 2D context unavailable.");
           octx.fillStyle = "#ffffff";
           octx.fillRect(0, 0, off.width, off.height);
+
+          // FIX: Added `canvas: off` to satisfy pdfjs-dist v5/v6 types
           const t = pdfPage.render({
+            canvas: off,
             canvasContext: octx,
             viewport,
             intent: "display",
           });
+
           task = t;
           await t.promise;
         }
@@ -201,6 +222,12 @@ function PageCanvasImpl({
       />
 
       {showGrid && <GridOverlay pageInfo={pageInfo} />}
+
+      <PageOverlayPreview
+        pageInfo={pageInfo}
+        pageIndex={pageIndex}
+        totalPages={totalPages}
+      />
 
       <ObjectLayer
         pageIndex={pageIndex}

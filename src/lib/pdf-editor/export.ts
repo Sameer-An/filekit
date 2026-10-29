@@ -1,20 +1,5 @@
 // src/lib/pdf-editor/export.ts
 // Serialise the editor's model into a real PDF using pdf-lib.
-//
-// Strategy:
-//  1. Load original bytes.
-//  2. If page ops move/delete/insert/duplicate/extract are queued, build a
-//     new document that copies the selected pages in the final order.
-//     Rotation is applied per-page. Appended bytes (merge) are copied in.
-//  3. For each page, walk `pageObjectIds[page]` in z-order and draw:
-//       - dirty text-runs: cover with sampled bg, redraw
-//       - image-placement with replacement: cover, embed, draw
-//       - new-text, new-image, shape, draw, highlight, underline, strike,
-//         whiteout, redact, signature, link, note, stamp, checkmark
-//     Untouched text-runs and untouched image placements are left alone —
-//     the original content stream is preserved byte-for-byte.
-//  4. Apply page-range cropping on the output if requested.
-//  5. Save with `useObjectStreams` when `compress` is true.
 
 import {
 PDFDocument,
@@ -45,6 +30,7 @@ StrikeObject,
 WhiteoutObject,
 RedactObject,
 NewImageObject,
+OverlaySettings,
 } from "./types";
 import {
 resolveFontForTextRun,
@@ -52,6 +38,7 @@ resolveFontForRun,
 hexToRgbTriplet,
 } from "./fonts";
 import { applyPageOps } from "./page-ops";
+import { getOverlayRects } from "./overlay-layout";
 
 interface ExportInput {
 originalBytes: Uint8Array;
@@ -59,13 +46,21 @@ pages: PageInfo[];
 objects: Record<string, PDFObject>;
 pageObjectIds: string[][];
 pageOps: PageOp[];
+overlays: OverlaySettings;
 options: ExportOptions;
 }
 
 /** Top-level entry point. Returns the bytes of the final PDF. */
 export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
-const { originalBytes, pages, objects, pageObjectIds, pageOps, options } =
-    input;
+const {
+    originalBytes,
+    pages,
+    objects,
+    pageObjectIds,
+    pageOps,
+    overlays,
+    options,
+} = input;
 
 // 1. Load source.
 const src = await PDFDocument.load(originalBytes, {
@@ -81,7 +76,6 @@ const finalObjects = model.objects;
 
 // 3. Build target document.
 let target: PDFDocument;
-// Fast path: no ops that change page count/order → reuse `src` in place.
 const hasStructuralOps = pageOps.some(
     (op) =>
     op.op === "move" ||
@@ -124,12 +118,10 @@ if (!hasStructuralOps && isIdentity) {
         used.add(idx);
         target.addPage(bulk[firstPos.get(idx)!]);
         } else {
-        // A duplicate needs its OWN page object.
         const [dup] = await target.copyPages(src, [idx]);
         target.addPage(dup);
         }
     } else {
-        // Blank page (inserted)
         target.addPage([finalPages[i].widthPt, finalPages[i].heightPt]);
     }
     }
@@ -160,15 +152,55 @@ for (let i = 0; i < finalPages.length && i < targetPages.length; i++) {
     }
 }
 
-// 6. Draw objects per page.
+// 6. Draw objects and overlays per page.
 for (let pageIdx = 0; pageIdx < finalPages.length; pageIdx++) {
     const page = targetPages[pageIdx];
     if (!page) continue;
     const ids = finalPageIds[pageIdx] ?? [];
+
+    // Pass 1: cover ORIGINAL content of edited/moved/deleted items
+    for (const id of ids) {
+    const obj = finalObjects[id];
+    if (obj) drawCover(page, obj, finalPages[pageIdx]);
+    }
+
+    // Pass 2: draw new content
     for (const id of ids) {
     const obj = finalObjects[id];
     if (!obj) continue;
     await drawObject(target, page, obj, finalPages[pageIdx]);
+    }
+
+    // Pass 3: draw overlays (Header, Footer, Watermark, Page Numbers)
+    const overlayRects = getOverlayRects(
+    overlays,
+    finalPages[pageIdx],
+    pageIdx,
+    finalPages.length,
+    );
+    for (const r of overlayRects) {
+    if (!r.text) continue;
+
+    const font = await target.embedFont(StandardFonts.Helvetica);
+    const textW = font.widthOfTextAtSize(r.text, r.fontSize);
+    const [cr, cg, cb] = hexToRgbTriplet(r.color);
+    const color = rgb(cr, cg, cb);
+
+    let x = r.rect.x;
+    if (r.align === "center") x += (r.rect.w - textW) / 2;
+    else if (r.align === "right") x += r.rect.w - textW;
+
+    const y = r.rect.y + r.rect.h / 2 - r.fontSize / 3;
+
+    page.drawText(r.text, {
+        x,
+        y,
+        size: r.fontSize,
+        font,
+        color,
+        opacity: r.opacity,
+        rotate: degrees(r.rotation),
+    });
     }
 }
 
@@ -245,21 +277,8 @@ page: PDFPage,
 run: TextRunObject,
 pageInfo: PageInfo,
 ): Promise<void> {
-if (!run.dirty) return; // untouched — leave original content untouched
+if (!run.dirty || run.deleted) return;
 const rect = clampRect(run.rect, pageInfo);
-
-// Cover with sampled background (never paint outside the page).
-const [br, bg, bb] = hexToRgbTriplet(run.backgroundColor);
-page.drawRectangle({
-    x: rect.x,
-    y: rect.y,
-    width: rect.w,
-    height: rect.h,
-    color: rgb(br, bg, bb),
-    opacity: 1,
-});
-
-// Redraw text.
 const resolved = await resolveFontForTextRun(doc, run);
 const [tr, tg, tb] = hexToRgbTriplet(run.color);
 const color = rgb(tr, tg, tb);
@@ -270,7 +289,6 @@ const lines = wrapLines(
     rect.w,
     resolved.widthOfTextAtSize,
 );
-
 const lineH = run.fontSize * (run.lineHeight || 1.2);
 const baselineY = rect.y + rect.h - run.fontSize * 1.0;
 
@@ -291,6 +309,15 @@ for (let i = 0; i < lines.length; i++) {
     page.drawLine({
         start: { x: rect.x, y: y - run.fontSize * 0.12 },
         end: { x: rect.x + w, y: y - run.fontSize * 0.12 },
+        thickness: Math.max(0.5, run.fontSize * 0.06),
+        color,
+    });
+    }
+    if (run.strike) {
+    const w = resolved.widthOfTextAtSize(line, run.fontSize);
+    page.drawLine({
+        start: { x: rect.x, y: y + run.fontSize * 0.3 },
+        end: { x: rect.x + w, y: y + run.fontSize * 0.3 },
         thickness: Math.max(0.5, run.fontSize * 0.06),
         color,
     });
@@ -349,6 +376,15 @@ for (let i = 0; i < lines.length; i++) {
         color,
     });
     }
+    if (obj.strike) {
+    const w = resolved.widthOfTextAtSize(line, obj.fontSize);
+    page.drawLine({
+        start: { x, y: y + obj.fontSize * 0.3 },
+        end: { x: x + w, y: y + obj.fontSize * 0.3 },
+        thickness: Math.max(0.5, obj.fontSize * 0.06),
+        color,
+    });
+    }
 }
 }
 
@@ -360,7 +396,7 @@ maxWidth: number,
 measure: (s: string, size: number) => number,
 ): string[] {
 if (!text) return [""];
-const words = text.split(/(\s+)/); // keep whitespace tokens
+const words = text.split(/(\s+)/);
 const lines: string[] = [];
 let current = "";
 const measureWithSpacing = (s: string) =>
@@ -392,32 +428,93 @@ return { x, y, w, h };
 
 /* ───────────── Images ───────────── */
 
+async function preCropImage(
+src: string,
+crop: { l: number; t: number; r: number; b: number },
+): Promise<string> {
+if (typeof document === "undefined") return src;
+return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+    const cw = img.width * (1 - crop.l - crop.r);
+    const ch = img.height * (1 - crop.t - crop.b);
+    const canvas = document.createElement("canvas");
+    canvas.width = cw;
+    canvas.height = ch;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return resolve(src);
+    ctx.drawImage(
+        img,
+        img.width * crop.l,
+        img.height * crop.t,
+        cw,
+        ch,
+        0,
+        0,
+        cw,
+        ch,
+    );
+    resolve(canvas.toDataURL("image/png"));
+    };
+    img.onerror = () => resolve(src);
+    img.src = src;
+});
+}
+
 async function drawImagePlacement(
 doc: PDFDocument,
 page: PDFPage,
 obj: ImagePlacementObject,
 ): Promise<void> {
-if (!obj.dirty || !obj.replacementDataUrl) return;
-const rect = obj.rect;
-// Cover the original placement so the swap looks clean.
-const bg = hexToRgbTriplet("#ffffff");
-page.drawRectangle({
-    x: rect.x,
-    y: rect.y,
-    width: rect.w,
-    height: rect.h,
-    color: rgb(bg[0], bg[1], bg[2]),
-    opacity: 1,
-});
-const img = await embedImageFromDataUrl(doc, obj.replacementDataUrl);
+if (!obj.dirty || obj.deleted) return;
+let src = obj.replacementDataUrl ?? obj.dataUrl;
+if (!src) return;
+
+if (
+    obj.crop &&
+    (obj.crop.l > 0 || obj.crop.t > 0 || obj.crop.r > 0 || obj.crop.b > 0)
+) {
+    src = await preCropImage(src, obj.crop);
+}
+
+const img = await embedImageFromDataUrl(doc, src);
 if (!img) return;
+
 page.drawImage(img, {
-    x: rect.x,
-    y: rect.y,
-    width: rect.w,
-    height: rect.h,
+    x: obj.rect.x,
+    y: obj.rect.y,
+    width: obj.rect.w,
+    height: obj.rect.h,
     opacity: obj.opacity,
 });
+}
+
+function drawCover(page: PDFPage, obj: PDFObject, pageInfo: PageInfo): void {
+if (obj.kind === "text-run") {
+    if (!obj.dirty && !obj.deleted) return;
+    const r = clampRect(obj.origRect ?? obj.rect, pageInfo);
+    const [br, bg, bb] = hexToRgbTriplet(obj.backgroundColor || "#ffffff");
+    page.drawRectangle({
+    x: r.x,
+    y: r.y,
+    width: r.w,
+    height: r.h,
+    color: rgb(br, bg, bb),
+    opacity: 1,
+    });
+} else if (obj.kind === "image-placement") {
+    const canRedraw = !!(obj.replacementDataUrl ?? obj.dataUrl);
+    if (!obj.deleted && !(obj.dirty && canRedraw)) return;
+    const r = clampRect(obj.origRect ?? obj.rect, pageInfo);
+    page.drawRectangle({
+    x: r.x,
+    y: r.y,
+    width: r.w,
+    height: r.h,
+    color: rgb(1, 1, 1),
+    opacity: 1,
+    });
+}
 }
 
 async function drawNewImage(
@@ -464,6 +561,7 @@ const { x, y, w, h } = obj.rect;
 const [sr, sg, sb] = hexToRgbTriplet(obj.stroke);
 const strokeColor = rgb(sr, sg, sb);
 const fillColor = obj.fill ? rgb(...hexToRgbTriplet(obj.fill)) : undefined;
+
 if (obj.shape === "rect") {
     page.drawRectangle({
     x,
@@ -528,14 +626,18 @@ const [r, g, b] = hexToRgbTriplet(obj.stroke);
 const color = rgb(r, g, b);
 for (const stroke of obj.strokes) {
     if (stroke.points.length < 2) continue;
-    // Simple polyline; the editor side uses perfect-freehand for the live
-    // preview but exports the raw points to keep the file small.
     for (let i = 1; i < stroke.points.length; i++) {
     const a = stroke.points[i - 1];
     const c = stroke.points[i];
     page.drawLine({
-        start: { x: obj.rect.x + a[0], y: obj.rect.y + a[1] },
-        end: { x: obj.rect.x + c[0], y: obj.rect.y + c[1] },
+        start: {
+        x: obj.rect.x + a[0] * obj.rect.w,
+        y: obj.rect.y + a[1] * obj.rect.h,
+        },
+        end: {
+        x: obj.rect.x + c[0] * obj.rect.w,
+        y: obj.rect.y + c[1] * obj.rect.h,
+        },
         thickness: obj.strokeWidth,
         color,
         opacity: obj.opacity,
