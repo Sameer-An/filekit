@@ -3,7 +3,7 @@
 // and walk the `paintImage*` operators while tracking the current transform.
 // Each placement becomes an ImagePlacementObject so the editor can select,
 // move, replace or delete it.
-
+import { pageUid } from "./coords";
 import type { PDFPageProxy } from "pdfjs-dist";
 import type { ImagePlacementObject, PageInfo, RectPt } from "./types";
 
@@ -186,8 +186,8 @@ return new Promise((resolve) => {
 }
 
 /** Deterministic id per (page, z-index) so re-extraction is stable. */
-function makePlacementId(pageIndex: number, z: number): string {
-return `img-${pageIndex}-${z}`;
+function makePlacementId(pageKey: string, z: number): string {
+return `img-${pageKey}-${z}`;
 }
 
 /**
@@ -242,7 +242,7 @@ for (let i = 0; i < ops.fnArray.length; i++) {
     if (!isPlausibleImageRect(rect, pageInfo)) continue;
 
     const z = out.length;
-    const id = makePlacementId(pageInfo.index, z);
+    const id = makePlacementId(pageUid(pageInfo), z);
     if (seen.has(id)) continue;
     seen.add(id);
 

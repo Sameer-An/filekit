@@ -48,7 +48,7 @@ NewImageObject,
 } from "./types";
 import {
 resolveFontForTextRun,
-resolveFontForNewText,
+resolveFontForRun,
 hexToRgbTriplet,
 } from "./fonts";
 import { applyPageOps } from "./page-ops";
@@ -94,47 +94,46 @@ const hasStructuralOps = pageOps.some(
 
 const srcPageCount = src.getPageCount();
 
-if (!hasStructuralOps && finalPages.length === srcPageCount) {
+const isIdentity =
+    finalPages.length === srcPageCount &&
+    finalPages.every((p, i) => p.index === i);
+
+if (!hasStructuralOps && isIdentity) {
     target = src;
 } else {
     target = await PDFDocument.create();
-    // Copy pages in the order the model dictates. For each new page, find
-    // its source index. `extract` shrinks the list; `duplicate` repeats.
-    // We reconstruct source indices from the *original* `pages` array by
-    // matching geometry+rotation where possible; a simpler approach is to
-    // trust that finalPages[i] corresponds to original page `pages` before
-    // any op that reordered — but that loses provenance on reorders.
-    //
-    // For v1 we handle reorder/delete/duplicate/insert in a pragmatic way:
-    // take finalPages as authoritative for order, and copy source pages by
-    // index from the *current* model before ops (which is exactly what the
-    // caller passed: `pages`). That means:
-    //   - move: pages were reordered; we copy by pageMap.
-    //   - delete: shortened list.
-    //   - duplicate: repeated source index.
-    //   - insert-blank: new size, no source page.
-    // Because `applyPageOps` already produced `finalPages`, we can infer
-    // the source index for each final page by matching `finalPages[i]` to
-    // `pages` by identity of `index` when possible, falling back to order.
-    const srcIndices = inferSourceIndices(pages, finalPages, pageOps);
-    // Copy all source pages we need, in original order, then reorder.
-    const copyOrder = Array.from(new Set(srcIndices.filter((n) => n >= 0)));
-    const copiedMap = new Map<number, PDFPage>();
-    if (copyOrder.length > 0) {
-    const copied = await target.copyPages(
-        src,
-        copyOrder.map((i) => Math.min(srcPageCount - 1, Math.max(0, i))),
-    );
-    copyOrder.forEach((srcIdx, k) => copiedMap.set(srcIdx, copied[k]));
+
+    const srcIndices = finalPages.map((p) => p.index); // -1 = blank
+    const firstPos = new Map<number, number>();
+    const unique: number[] = [];
+
+    for (const idx of srcIndices) {
+    if (idx >= 0 && idx < srcPageCount && !firstPos.has(idx)) {
+        firstPos.set(idx, unique.length);
+        unique.push(idx);
     }
+    }
+
+    const bulk = unique.length ? await target.copyPages(src, unique) : [];
+    const used = new Set<number>();
+
     for (let i = 0; i < finalPages.length; i++) {
-    const srcIdx = srcIndices[i];
-    if (srcIdx >= 0 && copiedMap.has(srcIdx)) {
-        target.addPage(copiedMap.get(srcIdx)!);
+    const idx = srcIndices[i];
+    if (idx >= 0 && idx < srcPageCount) {
+        if (!used.has(idx)) {
+        used.add(idx);
+        target.addPage(bulk[firstPos.get(idx)!]);
+        } else {
+        // A duplicate needs its OWN page object.
+        const [dup] = await target.copyPages(src, [idx]);
+        target.addPage(dup);
+        }
     } else {
+        // Blank page (inserted)
         target.addPage([finalPages[i].widthPt, finalPages[i].heightPt]);
     }
     }
+
     // 4. Merge appended bytes, if any.
     for (const op of pageOps) {
     if (op.op === "merge") {
@@ -194,32 +193,6 @@ return target.save({ useObjectStreams: options.compress });
 
 /* ───────────── Helpers ───────────── */
 
-function inferSourceIndices(
-original: PageInfo[],
-final: PageInfo[],
-ops: PageOp[],
-): number[] {
-// Heuristic: for each final page, try to find a matching original page by
-// (index, width, height, rotation) triple. If the model didn't rotate,
-// match by index. Duplicates share the same origin.
-const byKey = new Map<string, number>();
-for (const p of original) {
-    byKey.set(`${p.index}|${p.widthPt}|${p.heightPt}`, p.index);
-}
-return final.map((p) => {
-    const key = `${p.index}|${p.widthPt}|${p.heightPt}`;
-    if (byKey.has(key)) return byKey.get(key)!;
-    // Search by size+rotation as a fallback.
-    const fallback = original.find(
-    (o) =>
-        o.widthPt === p.widthPt &&
-        o.heightPt === p.heightPt &&
-        o.rotation === p.rotation,
-    );
-    return fallback ? fallback.index : -1;
-});
-}
-
 async function drawObject(
 doc: PDFDocument,
 page: PDFPage,
@@ -274,6 +247,7 @@ pageInfo: PageInfo,
 ): Promise<void> {
 if (!run.dirty) return; // untouched — leave original content untouched
 const rect = clampRect(run.rect, pageInfo);
+
 // Cover with sampled background (never paint outside the page).
 const [br, bg, bb] = hexToRgbTriplet(run.backgroundColor);
 page.drawRectangle({
@@ -284,6 +258,7 @@ page.drawRectangle({
     color: rgb(br, bg, bb),
     opacity: 1,
 });
+
 // Redraw text.
 const resolved = await resolveFontForTextRun(doc, run);
 const [tr, tg, tb] = hexToRgbTriplet(run.color);
@@ -295,8 +270,10 @@ const lines = wrapLines(
     rect.w,
     resolved.widthOfTextAtSize,
 );
+
 const lineH = run.fontSize * (run.lineHeight || 1.2);
-const baselineY = rect.y + rect.h - run.fontSize * 0.85;
+const baselineY = rect.y + rect.h - run.fontSize * 1.0;
+
 for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const y = baselineY - i * lineH;
@@ -308,6 +285,7 @@ for (let i = 0; i < lines.length; i++) {
     color,
     opacity: run.opacity,
     });
+
     if (run.underline) {
     const w = resolved.widthOfTextAtSize(line, run.fontSize);
     page.drawLine({
@@ -326,7 +304,12 @@ page: PDFPage,
 obj: NewTextObject,
 ): Promise<void> {
 const rect = obj.rect;
-const resolved = await resolveFontForNewText(doc, obj);
+const resolved = await resolveFontForRun(doc, {
+    fontFamily: obj.fontFamily,
+    bold: obj.bold,
+    italic: obj.italic,
+    text: obj.text,
+});
 const [r, g, b] = hexToRgbTriplet(obj.color);
 const color = rgb(r, g, b);
 const lines = wrapLines(
@@ -338,6 +321,7 @@ const lines = wrapLines(
 );
 const lineH = obj.fontSize * (obj.lineHeight || 1.2);
 const baselineY = rect.y + rect.h - obj.fontSize * 0.85;
+
 for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     let x = rect.x;
@@ -381,6 +365,7 @@ const lines: string[] = [];
 let current = "";
 const measureWithSpacing = (s: string) =>
     measure(s, fontSize) + letterSpacing * Math.max(0, s.length - 1);
+
 for (const w of words) {
     const candidate = current + w;
     if (measureWithSpacing(candidate) <= maxWidth || current === "") {

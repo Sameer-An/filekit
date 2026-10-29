@@ -6,7 +6,7 @@
 
 import type { PDFPageProxy } from "pdfjs-dist";
 import type { PageInfo, RectPt, TextRunObject } from "./types";
-import { normalizeHexColor, pdfjsTextItemToPdfRect } from "./coords";
+import { normalizeHexColor, pageUid, pdfjsTextItemToPdfRect } from "./coords";
 
 /** Subset of `TextItem` we actually consume (pdfjs v6). */
 interface PdfjsTextItem {
@@ -34,7 +34,7 @@ const KNOWN_FONT_FAMILIES: Array<[RegExp, string]> = [
 function inferFamily(fontName: string | undefined): string {
 if (!fontName) return "Helvetica";
 for (const [re, name] of KNOWN_FONT_FAMILIES) {
-if (re.test(fontName)) return name;
+    if (re.test(fontName)) return name;
 }
 return "Helvetica";
 }
@@ -67,16 +67,16 @@ fontName: string | undefined,
 ): CommonFontLike | null {
 if (!fontName) return null;
 try {
-const objs = page.commonObjs as unknown as {
+    const objs = page.commonObjs as unknown as {
     has?: (k: string) => boolean;
     get?: (k: string) => unknown;
-};
-if (objs.has && !objs.has(fontName)) return null;
-if (!objs.get) return null;
-const font = objs.get(fontName) as CommonFontLike | undefined;
-return font ?? null;
+    };
+    if (objs.has && !objs.has(fontName)) return null;
+    if (!objs.get) return null;
+    const font = objs.get(fontName) as CommonFontLike | undefined;
+    return font ?? null;
 } catch {
-return null;
+    return null;
 }
 }
 
@@ -84,7 +84,7 @@ return null;
 function hashString(input: string): string {
 let h = 5381;
 for (let i = 0; i < input.length; i++) {
-h = ((h << 5) + h) ^ input.charCodeAt(i);
+    h = ((h << 5) + h) ^ input.charCodeAt(i);
 }
 return (h >>> 0).toString(36);
 }
@@ -93,8 +93,8 @@ return (h >>> 0).toString(36);
  * Deterministic id for a run. Two extractions of the same page produce
  * identical ids so the store can merge them without duplicates.
  */
-function makeRunId(pageIndex: number, itemIndex: number, text: string): string {
-return `run-${pageIndex}-${itemIndex}-${hashString(text)}`;
+function makeRunId(pageKey: string, itemIndex: number, text: string): string {
+  return `run-${pageKey}-${itemIndex}-${hashString(text)}`;
 }
 
 interface ExtractOptions {
@@ -119,40 +119,40 @@ const out: TextRunObject[] = [];
 const seen = new Set<string>();
 
 for (let i = 0; i < items.length; i++) {
-const item = items[i];
-const text = typeof item.str === "string" ? item.str : "";
-if (!text.trim()) continue;
+    const item = items[i];
+    const text = typeof item.str === "string" ? item.str : "";
+    if (!text.trim()) continue;
 
-const rect = pdfjsTextItemToPdfRect({
+    const rect = pdfjsTextItemToPdfRect({
     transform: item.transform,
     width: item.width,
     height: item.height,
-});
-if (rect.w <= 0.1 || rect.h <= 0.1) continue;
+    });
+    if (rect.w <= 0.1 || rect.h <= 0.1) continue;
 
-const id = makeRunId(pageInfo.index, i, text);
-if (seen.has(id)) continue;
-seen.add(id);
+const id = makeRunId(pageUid(pageInfo), i, text);
+    if (seen.has(id)) continue;
+    seen.add(id);
 
-const common = readCommonFont(page, item.fontName);
-const familySource =
+    const common = readCommonFont(page, item.fontName);
+    const familySource =
     common?.name || common?.fallbackName || item.fontName || "";
-const family = inferFamily(familySource);
-const bold = common?.bold ?? inferBold(familySource);
-const italic = common?.italic ?? inferItalic(familySource);
+    const family = inferFamily(familySource);
+    const bold = common?.bold ?? inferBold(familySource);
+    const italic = common?.italic ?? inferItalic(familySource);
 
-// Font size from the linear part of the transform.
-const a = item.transform[0] ?? 1;
-const b = item.transform[1] ?? 0;
-const c = item.transform[2] ?? 0;
-const d = item.transform[3] ?? 1;
-const fontSize = Math.max(4, Math.hypot(c, d) || Math.hypot(a, b) || 10);
+    // Font size from the linear part of the transform.
+    const a = item.transform[0] ?? 1;
+    const b = item.transform[1] ?? 0;
+    const c = item.transform[2] ?? 0;
+    const d = item.transform[3] ?? 1;
+    const fontSize = Math.max(4, Math.hypot(c, d) || Math.hypot(a, b) || 10);
 
-const bg = options.sampleBackground
+    const bg = options.sampleBackground
     ? options.sampleBackground(rect)
     : (options.defaultBackground ?? "#ffffff");
 
-const run: TextRunObject = {
+    const run: TextRunObject = {
     id,
     kind: "text-run",
     page: pageInfo.index,
@@ -176,14 +176,14 @@ const run: TextRunObject = {
     lineHeight: 1.2,
     letterSpacing: 0,
     backgroundColor: normalizeHexColor(bg),
-};
-out.push(run);
+    };
+    out.push(run);
 }
 
 // Sort for stable visual order: top → bottom, then left → right.
 out.sort((p, q) => {
-if (Math.abs(q.rect.y - p.rect.y) > 1) return q.rect.y - p.rect.y;
-return p.rect.x - q.rect.x;
+    if (Math.abs(q.rect.y - p.rect.y) > 1) return q.rect.y - p.rect.y;
+    return p.rect.x - q.rect.x;
 });
 
 // Reassign z after sorting so the array order matches the visual order.
@@ -206,17 +206,17 @@ const merged: TextRunObject[] = [];
 const used = new Set<string>();
 
 for (const run of fresh) {
-const prior = byId.get(run.id);
-if (prior) {
+    const prior = byId.get(run.id);
+    if (prior) {
     merged.push(prior);
     used.add(prior.id);
-} else {
+    } else {
     merged.push(run);
-}
+    }
 }
 
 for (const run of existing) {
-if (!used.has(run.id) && run.dirty) merged.push(run);
+    if (!used.has(run.id) && run.dirty) merged.push(run);
 }
 
 return merged;

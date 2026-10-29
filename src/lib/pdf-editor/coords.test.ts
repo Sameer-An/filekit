@@ -65,7 +65,14 @@ assert(
     Math.abs(rotBack.y - rotPt.y) < 0.001,
     "Rotated page round trip",
 );
-
+const at = (rotation: 0 | 90 | 180 | 270, x: number, y: number) =>
+  pdfPtToCss({ x, y }, { ...page, rotation }, 1);
+const eq = (p: { x: number; y: number }, x: number, y: number, m: string) =>
+  assert(Math.abs(p.x - x) < 1e-6 && Math.abs(p.y - y) < 1e-6, m);
+eq(at(90, 0, 0), 0, 0, "rot90 bottom-left -> top-left");
+eq(at(90, 0, 842), 842, 0, "rot90 top-left -> top-right");
+eq(at(180, 0, 0), 595, 0, "rot180 bottom-left -> top-right");
+eq(at(270, 0, 0), 842, 595, "rot270 bottom-left -> bottom-right");
 console.log("All coordinate tests passed!");
 }
 

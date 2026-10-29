@@ -18,6 +18,7 @@ pageMap: Record<number, number>;
 export function clonePageInfo(p: PageInfo): PageInfo {
 return {
     index: p.index,
+    uid: p.uid,
     widthPt: p.widthPt,
     heightPt: p.heightPt,
     rotation: p.rotation,
@@ -85,7 +86,11 @@ switch (op.op) {
         return identityResult(pages, pageObjectIds, objects);
     }
     const p = pages[idx];
-    const newRotation = ((p.rotation + op.delta) % 360) as 0 | 90 | 180 | 270;
+    const newRotation = ((((p.rotation + op.delta) % 360) + 360) % 360) as
+        | 0
+        | 90
+        | 180
+        | 270;
     pages[idx] = { ...p, rotation: newRotation };
     return buildResult(pages, pageObjectIds, objects);
     }
@@ -122,7 +127,13 @@ switch (op.op) {
         objects[newId] = { ...src, id: newId, page: idx + 1 };
         newIds.push(newId);
     }
-    pages.splice(idx + 1, 0, { ...clonePageInfo(srcPage), index: idx + 1 });
+
+    // Keep `index` = SOURCE page so the copy renders/exports the same content.
+    pages.splice(idx + 1, 0, {
+        ...clonePageInfo(srcPage),
+        uid: crypto.randomUUID(),
+    });
+
     pageObjectIds.splice(idx + 1, 0, newIds);
     // Recompute page numbers.
     pages.forEach((_, newIdx) => {
@@ -137,7 +148,8 @@ switch (op.op) {
     const after = op.afterIndex;
     const insertAt = Math.max(0, Math.min(pages.length, after + 1));
     const newPage: PageInfo = {
-        index: insertAt,
+        index: -1, // blank page: no source page
+        uid: crypto.randomUUID(),
         widthPt: op.widthPt,
         heightPt: op.heightPt,
         rotation: 0,
@@ -228,7 +240,11 @@ delta: 90 | 180 | 270,
 ): PageInfo[] {
 return pages.map((p) => ({
     ...clonePageInfo(p),
-    rotation: ((p.rotation + delta) % 360) as 0 | 90 | 180 | 270,
+    rotation: ((((p.rotation + delta) % 360) + 360) % 360) as
+    | 0
+    | 90
+    | 180
+    | 270,
 }));
 }
 
