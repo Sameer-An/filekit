@@ -25,11 +25,8 @@
  * `pages[].text` always reflects the original page content.
  */
 
-import {
-  getDocument,
-  GlobalWorkerOptions,
-  version,
-} from "pdfjs-dist/legacy/build/pdf.mjs";
+import { getPdfjs } from "./pdf-editor/pdfjs";
+import type { PDFDocumentLoadingTask } from "pdfjs-dist";
 
 /* ------------------------------------------------------------------ */
 /* Public types                                                       */
@@ -102,38 +99,18 @@ const NUMERIC_RE = /^[+-]?\d+(?:\.\d+)?%?$/;
 const LIST_MARKER_RE = /^[\(\[]?(?:\d+|[a-zA-Z]|[ivxIVX]+)[\)\].]?$/;
 
 /* ------------------------------------------------------------------ */
-/* Worker                                                             */
-/* ------------------------------------------------------------------ */
-
-function configurePdfWorker(): void {
-  if (typeof window === "undefined") {
-    GlobalWorkerOptions.workerSrc = "";
-    return;
-  }
-  try {
-    GlobalWorkerOptions.workerSrc = new URL(
-      "pdfjs-dist/legacy/build/pdf.worker.min.mjs",
-      import.meta.url
-    ).toString();
-  } catch {
-    GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${version}/legacy/build/pdf.worker.min.mjs`;
-  }
-}
-
-/* ------------------------------------------------------------------ */
 /* Public API                                                         */
 /* ------------------------------------------------------------------ */
 
 export async function extractPdfText(
   pdfBuffer: ArrayBuffer
 ): Promise<ExtractedPdf> {
-  configurePdfWorker();
-
+  const pdfjs = await getPdfjs();
   const isBrowser = typeof window !== "undefined";
-  let loadingTask: ReturnType<typeof getDocument> | undefined;
+  let loadingTask: PDFDocumentLoadingTask | undefined;
 
   try {
-    loadingTask = getDocument({
+    loadingTask = pdfjs.getDocument({
       data: new Uint8Array(pdfBuffer),
       ...(isBrowser ? {} : { disableWorker: true }),
     });

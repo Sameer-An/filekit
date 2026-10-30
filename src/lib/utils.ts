@@ -74,7 +74,10 @@ export function downloadBlob(blob: Blob, filename: string): void {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  // Revoke after a delay so the browser has time to start the download.
+  // Revoking synchronously right after click() can cancel the download in
+  // some browsers before the resource is fetched.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
 export function isValidFileType(file: File, acceptedTypes: string[]): boolean {

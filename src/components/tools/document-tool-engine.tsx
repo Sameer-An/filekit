@@ -482,8 +482,8 @@ export function DocumentToolEngine({ tool }: { tool: ToolDefinition }) {
         const html = await convertDocxToHtml(f);
         await saveDocToDB(html, f.name);
 
-        if (newTab) newTab.location.href = "/editor";
-        else window.location.href = "/editor";
+        if (newTab) newTab.location.href = "/pdf-editor";
+        else window.location.href = "/pdf-editor";
 
         setJob(null);
       } catch (err) {

@@ -1,16 +1,12 @@
 "use client";
 
-async function loadPdfjs() {
-  const pdfjs = await import("pdfjs-dist");
-  pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
-  return pdfjs;
-}
+import { getPdfjs } from "./pdf-editor/pdfjs";
 
 export async function renderPdfPages(
   buffer: ArrayBuffer,
   scale = 1.4,
 ): Promise<{ canvas: HTMLCanvasElement; width: number; height: number }[]> {
-  const pdfjs = await loadPdfjs();
+  const pdfjs = await getPdfjs();
   const data = new Uint8Array(buffer);
   const pdf = await pdfjs.getDocument({ data }).promise;
   const pages: { canvas: HTMLCanvasElement; width: number; height: number }[] =
@@ -25,7 +21,6 @@ export async function renderPdfPages(
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) throw new Error("Canvas is not available in this browser.");
 
-    // FIX: pdfjs-dist v5/v6 mein render parameters mein `canvas` dena zaroori hai
     await page.render({ canvas, canvasContext: ctx, viewport }).promise;
 
     pages.push({ canvas, width: canvas.width, height: canvas.height });

@@ -5,6 +5,11 @@ import fs from 'fs';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import { FFMPEG_PATH, MAX_FILE_SIZE_BYTES } from '@/lib/constants';
+import { checkRateLimit } from '@/lib/rate-limit';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const maxDuration = 300;
 
 // Supported output extensions and MIME types
 const MIME_MAP: Record<string, string> = {
@@ -26,6 +31,9 @@ const MIME_MAP: Record<string, string> = {
 };
 
 export async function POST(req: NextRequest) {
+  const rateLimitResponse = checkRateLimit(req);
+  if (rateLimitResponse) return rateLimitResponse;
+
   const jobId = uuidv4();
   const workDir = path.join(os.tmpdir(), `FileKit-media-${jobId}`);
 

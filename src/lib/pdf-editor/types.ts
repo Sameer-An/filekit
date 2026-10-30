@@ -63,19 +63,8 @@ export type FontFamilyId =
   | "Times New Roman"
   | "Georgia"
   | "Courier New"
-  | "Verdana"
-  | "Tahoma"
-  | "Trebuchet MS"
-  | "Calibri"
   | "Cambria"
   | "Garamond"
-  | "Comic Sans MS"
-  | "Impact"
-  | "Roboto"
-  | "Open Sans"
-  | "Lato"
-  | "Montserrat"
-  | "Poppins"
   | "Noto Sans";
 
 export interface BaseObject {
