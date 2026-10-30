@@ -10,7 +10,12 @@ import React, {
 } from "react";
 import { usePdfEditor } from "@/lib/pdf-editor/store";
 import { PageCanvas } from "./PageCanvas";
-import { pageUid, rotatedPageSize } from "@/lib/pdf-editor/coords";
+import {
+  clampRect,
+  cssToPdfPt,
+  pageUid,
+  rotatedPageSize,
+} from "@/lib/pdf-editor/coords";
 
 const PAGE_GAP = 24;
 const PAD_X = 24;
@@ -54,14 +59,67 @@ export function PageViewport() {
         return;
       const st = usePdfEditor.getState();
       const mod = e.ctrlKey || e.metaKey;
+
       if (e.key === "Delete" || e.key === "Backspace") {
         if (st.selectedIds.length) {
           e.preventDefault();
           st.deleteSelected();
         }
       } else if (e.key === "Escape") {
-        st.selectObjects([]);
-        st.selectTool("select");
+        if (st.editingId) {
+          st.setEditingId(null);
+        } else {
+          st.selectObjects([]);
+          st.selectTool("select");
+        }
+      } else if (e.key === "Enter" && !mod) {
+        if (st.selectedIds.length === 1 && !st.editingId) {
+          const selId = st.selectedIds[0];
+          const obj = st.objects[selId];
+          if (
+            obj &&
+            (obj.kind === "text-run" || obj.kind === "new-text") &&
+            !obj.locked &&
+            !obj.deleted
+          ) {
+            e.preventDefault();
+            st.setEditingId(selId);
+          }
+        }
+      } else if (
+        ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)
+      ) {
+        if (st.selectedIds.length > 0 && !st.editingId) {
+          e.preventDefault();
+          const step = e.shiftKey ? 10 : 1;
+          const curPageInfo = st.pages[st.currentPage] ?? st.pages[0];
+          if (!curPageInfo) return;
+
+          const dxScreen =
+            e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+          const dyScreen =
+            e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+
+          const p0 = cssToPdfPt({ x: 0, y: 0 }, curPageInfo, 1);
+          const p1 = cssToPdfPt({ x: dxScreen, y: dyScreen }, curPageInfo, 1);
+          const dxPt = p1.x - p0.x;
+          const dyPt = p1.y - p0.y;
+
+          st.commit("Nudge object", (d) => {
+            for (const id of st.selectedIds) {
+              const obj = d.objects[id];
+              if (!obj || obj.locked || obj.deleted) continue;
+              const nextRect = clampRect(
+                { ...obj.rect, x: obj.rect.x + dxPt, y: obj.rect.y + dyPt },
+                curPageInfo,
+              );
+              obj.rect = nextRect;
+              if (obj.kind === "text-run" || obj.kind === "image-placement") {
+                obj.dirty = true;
+              }
+            }
+          });
+        }
       } else if (mod && e.key.toLowerCase() === "z") {
         e.preventDefault();
         if (e.shiftKey) st.redo();
@@ -87,7 +145,6 @@ export function PageViewport() {
     const el = scrollRef.current;
     if (!el) return;
     const measure = () => setView({ w: el.clientWidth, h: el.clientHeight });
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
@@ -125,7 +182,6 @@ export function PageViewport() {
     const cw = view.w - PAD_X * 2;
     const ch = view.h - PAD_Y * 2;
     const target = fitMode === "width" ? cw / w : Math.min(cw / w, ch / h);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (Number.isFinite(target) && target > 0) setZoom(target, true);
   }, [fitMode, pages, currentPage, view.w, view.h, setZoom]);
 

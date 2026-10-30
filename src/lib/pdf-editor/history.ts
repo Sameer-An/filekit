@@ -9,6 +9,20 @@
 
 import type { PageInfo, PDFObject, PageOp, GridSettings } from "./types";
 
+/**
+ * Maximum number of undo steps kept in memory.
+ *
+ * IMPORTANT — memory safety: history entries share object references with
+ * each other and with the live store via structural sharing. The `commit`
+ * function in store.ts copies only the *top-level containers* (objects map,
+ * pageObjectIds array, pages array, pageOps array) with a shallow spread /
+ * `.slice()`. Each `PDFObject` inside those containers — including any
+ * `dataUrl` field that may hold a base64-encoded image — is referenced, not
+ * duplicated. This means 100 history entries cost O(1) extra memory per
+ * unmodified object, NOT O(100 * image_size). Never replace the shallow
+ * spreads in `commit` with `JSON.parse(JSON.stringify(...))` or
+ * `structuredClone`; doing so would copy every image 100 times.
+ */
 export const HISTORY_LIMIT = 100;
 
 export interface HistorySnapshot {

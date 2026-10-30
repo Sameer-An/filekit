@@ -499,16 +499,18 @@
     });
     }
 
+    const COVER_PAD = 0.5; // pt padding each side to hide anti-aliased edges
+
     function drawCover(page: PDFPage, obj: PDFObject, pageInfo: PageInfo): void {
     if (obj.kind === "text-run") {
         if (!obj.dirty && !obj.deleted) return;
         const r = clampRect(obj.origRect ?? obj.rect, pageInfo);
         const [br, bg, bb] = hexToRgbTriplet(obj.backgroundColor || "#ffffff");
         page.drawRectangle({
-        x: r.x,
-        y: r.y,
-        width: r.w,
-        height: r.h,
+        x: Math.max(0, r.x - COVER_PAD),
+        y: Math.max(0, r.y - COVER_PAD),
+        width: r.w + COVER_PAD * 2,
+        height: r.h + COVER_PAD * 2,
         color: rgb(br, bg, bb),
         opacity: 1,
         });
@@ -517,10 +519,10 @@
         if (!obj.deleted && !(obj.dirty && canRedraw)) return;
         const r = clampRect(obj.origRect ?? obj.rect, pageInfo);
         page.drawRectangle({
-        x: r.x,
-        y: r.y,
-        width: r.w,
-        height: r.h,
+        x: Math.max(0, r.x - COVER_PAD),
+        y: Math.max(0, r.y - COVER_PAD),
+        width: r.w + COVER_PAD * 2,
+        height: r.h + COVER_PAD * 2,
         color: rgb(1, 1, 1),
         opacity: 1,
         });

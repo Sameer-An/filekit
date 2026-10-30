@@ -32,6 +32,16 @@ import {
 
 const EMPTY_IDS: readonly string[] = [];
 
+/**
+ * Tracks which page UIDs have already had their text/image objects extracted
+ * from the underlying PDF and injected into the store. This prevents
+ * double-injection when a page scrolls in and out of view.
+ *
+ * Cleared in `initDocument` and `loadSession` — the two entry points that
+ * load a new document — so reopening a different PDF always starts with a
+ * clean extraction state. There is no separate "close file" action; every
+ * open path goes through one of those two functions.
+ */
 const extractedUids = new Set<string>();
 
 export function isPageExtracted(uid: string): boolean {
@@ -306,6 +316,13 @@ export const usePdfEditor = create<PdfEditorState>((set, get) => ({
   commit: (label, mutator) => {
     const s = get();
 
+    // Shallow-copy the top-level containers only. Individual PDFObject values
+    // (which may carry a base64 dataUrl) are shared by reference across
+    // history entries. See HISTORY_LIMIT in history.ts for why this matters.
+    // NEVER replace these spreads with structuredClone / JSON round-trips.
+    //
+    // Callers must call `commit` only on pointer-up or blur -- not on every
+    // keystroke or pointer-move pixel -- so one user action = one undo step.
     const draft: CommitDraft = {
       objects: { ...s.objects },
       pageObjectIds: clonePageIds(s.pageObjectIds),

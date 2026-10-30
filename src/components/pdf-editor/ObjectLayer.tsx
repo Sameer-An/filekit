@@ -11,7 +11,7 @@ import type {
   NewTextObject,
   HighlightObject,
 } from "@/lib/pdf-editor/types";
-import { pdfRectToCss, cssRectToPdf, snapPt } from "@/lib/pdf-editor/coords";
+import { pdfRectToCss, cssRectToPdf, snapPt, cssToPdfPt } from "@/lib/pdf-editor/coords";
 
 interface ObjectLayerProps {
   pageIndex: number;
@@ -21,6 +21,8 @@ interface ObjectLayerProps {
 }
 
 const DRAG_THRESHOLD = 4; // screen px
+// +0.5pt on each side matches drawCover() in export.ts
+const COVER_PAD = 0.5;
 
 export function ObjectLayer({
   pageIndex,
@@ -34,6 +36,7 @@ export function ObjectLayer({
     activeTool,
     gridSnap,
     editingId,
+    currentPage,
     selectObjects,
     toggleObjectSelection,
     updateObject,
@@ -47,6 +50,7 @@ export function ObjectLayer({
       activeTool: s.activeTool,
       gridSnap: s.grid.snap,
       editingId: s.editingId,
+      currentPage: s.currentPage,
       selectObjects: s.selectObjects,
       toggleObjectSelection: s.toggleObjectSelection,
       updateObject: s.updateObject,
@@ -61,13 +65,13 @@ export function ObjectLayer({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const selectedSet = new Set(selectedIds);
 
-  /** 本地拖动状态：只在超过阈值后才有值 */
+  /** Local drag state: only set after threshold is exceeded */
   const [localDrag, setLocalDrag] = useState<{
     id: string;
     rect: RectPt;
   } | null>(null);
 
-  /** 拖动候选（尚未超过阈值） */
+  /** Drag candidate (not yet over threshold) */
   const pendingRef = useRef<{
     id: string;
     mode: "move" | "resize";
@@ -78,7 +82,7 @@ export function ObjectLayer({
     started: boolean;
   } | null>(null);
 
-  /** 高亮拖拽矩形（屏幕坐标） */
+  /** Highlight drag rect (screen coords) */
   const highlightDragRef = useRef<{
     startX: number;
     startY: number;
@@ -93,7 +97,7 @@ export function ObjectLayer({
     h: number;
   } | null>(null);
 
-  // 图片上传
+  // Image upload
   useEffect(() => {
     if (activeTool === "image" && fileInputRef.current) {
       fileInputRef.current.click();
@@ -130,7 +134,7 @@ export function ObjectLayer({
     e.target.value = "";
   };
 
-  /** 在页面上创建新对象 */
+  /** Create a new object at a PDF-space rect */
   const createNewObjectAt = useCallback(
     (rectPt: RectPt) => {
       const id = `${activeTool}-${crypto.randomUUID()}`;
@@ -221,7 +225,7 @@ export function ObjectLayer({
     [activeTool, pageIndex, pageInfo, objects.length, addObject],
   );
 
-  /** 背景指针按下：选择 / 创建对象 / 高亮拖拽 */
+  /** Background pointer down: select / create / highlight drag */
   const onBackgroundPointerDown = useCallback(
     (e: React.PointerEvent) => {
       if (e.target !== e.currentTarget) return;
@@ -267,7 +271,7 @@ export function ObjectLayer({
     [activeTool, pageInfo, selectObjects, createNewObjectAt],
   );
 
-  /** 对象指针按下：准备拖动（尚未开始） */
+  /** Object pointer down: register drag candidate (no capture yet) */
   const onObjectPointerDown = (
     e: React.PointerEvent,
     obj: PDFObject,
@@ -293,9 +297,9 @@ export function ObjectLayer({
     };
   };
 
-  /** 全局指针移动：超过阈值后才真正拖动 */
+  /** Global pointer move: start drag only after threshold */
   const onPointerMove = (e: React.PointerEvent) => {
-    // 高亮拖拽
+    // Highlight drag
     if (highlightDragRef.current?.active) {
       const root = rootRef.current;
       if (!root) return;
@@ -320,12 +324,17 @@ export function ObjectLayer({
       const dyScreen = e.clientY - pending.startY;
       if (Math.hypot(dxScreen, dyScreen) < DRAG_THRESHOLD) return;
       pending.started = true;
+      // Capture only after threshold so dblclick is not swallowed
       (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
     }
 
     const storeZoom = usePdfEditor.getState().zoom;
-    const dxPt = (e.clientX - pending.startX) / storeZoom;
-    const dyPt = -(e.clientY - pending.startY) / storeZoom;
+    const dxScreen = (e.clientX - pending.startX) / storeZoom;
+    const dyScreen = (e.clientY - pending.startY) / storeZoom;
+    const p0 = cssToPdfPt({ x: 0, y: 0 }, pageInfo, 1);
+    const p1 = cssToPdfPt({ x: dxScreen, y: dyScreen }, pageInfo, 1);
+    const dxPt = p1.x - p0.x;
+    const dyPt = p1.y - p0.y;
     let next = { ...pending.startRect };
 
     if (pending.mode === "move") {
@@ -358,16 +367,15 @@ export function ObjectLayer({
     setLocalDrag({ id: pending.id, rect: next });
   };
 
-  /** 指针抬起：提交拖动 / 完成高亮 */
+  /** Pointer up: commit drag / finish highlight */
   const onPointerUp = (e: React.PointerEvent) => {
-    // 高亮
+    // Highlight
     if (highlightDragRef.current?.active) {
       const drag = highlightDragRef.current;
       highlightDragRef.current = null;
       setHighlightRect(null);
       const root = rootRef.current;
       if (!root) return;
-      const r = root.getBoundingClientRect();
       const left = Math.min(drag.startX, drag.currentX);
       const top = Math.min(drag.startY, drag.currentY);
       const w = Math.abs(drag.currentX - drag.startX);
@@ -377,7 +385,7 @@ export function ObjectLayer({
       const cssRect = { left, top, width: w, height: h };
       const pdfRect = cssRectToPdf(cssRect, pageInfo, 1);
 
-      // 找到与拖拽区域相交的文本行
+      // Find text runs intersecting the drag area
       const intersecting = objects.filter((o) => {
         if (o.kind !== "text-run" || o.deleted) return false;
         const c = pdfRectToCss(o.rect, pageInfo, 1);
@@ -390,7 +398,6 @@ export function ObjectLayer({
       });
 
       if (intersecting.length > 0) {
-        // 每行一个高亮
         commit("Highlight text", (d) => {
           for (const o of intersecting) {
             const id = `highlight-${crypto.randomUUID()}`;
@@ -410,7 +417,6 @@ export function ObjectLayer({
           }
         });
       } else {
-        // 空拖 → 普通矩形高亮
         const id = `highlight-${crypto.randomUUID()}`;
         const hl: HighlightObject = {
           id,
@@ -428,7 +434,7 @@ export function ObjectLayer({
       return;
     }
 
-    // 拖动提交
+    // Drag commit
     const pending = pendingRef.current;
     if (pending) {
       pendingRef.current = null;
@@ -442,7 +448,14 @@ export function ObjectLayer({
     }
   };
 
-  // 如果工具切换/页面切换，重置 editingId
+  // Reset editingId when tool changes or this page is no longer the current page
+  useEffect(() => {
+    const st = usePdfEditor.getState();
+    if (st.editingId) st.setEditingId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTool, pageIndex === currentPage ? null : currentPage]);
+
+  // Also clear on unmount
   useEffect(() => {
     return () => {
       const st = usePdfEditor.getState();
@@ -467,7 +480,75 @@ export function ObjectLayer({
         onChange={handleImageUpload}
       />
 
-      {/* 高亮拖拽预览 */}
+      {/* ─── COVER LAYER ────────────────────────────────────────────────────
+          Hides the original canvas pixels for edited / moved / deleted /
+          being-edited text runs and images. Rendered before the objects so
+          the new content appears on top. Matches drawCover() in export.ts
+          exactly: uses origRect ?? rect, expanded by COVER_PAD on each side,
+          filled with backgroundColor (text) or white (image).
+          pointer-events: none — never intercepts clicks.
+      ──────────────────────────────────────────────────────────────────── */}
+      {objects.map((obj) => {
+        if (obj.kind === "text-run") {
+          const isDragging = localDrag?.id === obj.id;
+          const needsCover =
+            obj.dirty || obj.deleted || editingId === obj.id || isDragging;
+          if (!needsCover) return null;
+          // Cover at the ORIGINAL position (before any drag)
+          const coverRect = obj.origRect ?? obj.rect;
+          const padded: RectPt = {
+            x: coverRect.x - COVER_PAD,
+            y: coverRect.y - COVER_PAD,
+            w: coverRect.w + COVER_PAD * 2,
+            h: coverRect.h + COVER_PAD * 2,
+          };
+          const css = pdfRectToCss(padded, pageInfo, 1);
+          return (
+            <div
+              key={`cover-${obj.id}`}
+              className="absolute pointer-events-none"
+              style={{
+                zIndex: 9,
+                left: css.left,
+                top: css.top,
+                width: css.width,
+                height: css.height,
+                background: obj.backgroundColor || "#ffffff",
+              }}
+            />
+          );
+        }
+        if (obj.kind === "image-placement") {
+          const canRedraw = !!(obj.replacementDataUrl ?? obj.dataUrl);
+          const needsCover = obj.deleted || (obj.dirty && canRedraw);
+          if (!needsCover) return null;
+          const coverRect = obj.origRect ?? obj.rect;
+          const padded: RectPt = {
+            x: coverRect.x - COVER_PAD,
+            y: coverRect.y - COVER_PAD,
+            w: coverRect.w + COVER_PAD * 2,
+            h: coverRect.h + COVER_PAD * 2,
+          };
+          const css = pdfRectToCss(padded, pageInfo, 1);
+          return (
+            <div
+              key={`cover-${obj.id}`}
+              className="absolute pointer-events-none"
+              style={{
+                zIndex: 9,
+                left: css.left,
+                top: css.top,
+                width: css.width,
+                height: css.height,
+                background: "#ffffff",
+              }}
+            />
+          );
+        }
+        return null;
+      })}
+
+      {/* Highlight drag preview */}
       {highlightRect && (
         <div
           className="absolute pointer-events-none z-30"
@@ -482,13 +563,12 @@ export function ObjectLayer({
         />
       )}
 
-      {/* 所有对象 */}
+      {/* All objects */}
       {objects.map((obj) => {
         if (obj.deleted) return null;
         const rect =
           localDrag && localDrag.id === obj.id ? localDrag.rect : obj.rect;
         const css = pdfRectToCss(rect, pageInfo, 1);
-        const selected = selectedSet.has(obj.id);
         return (
           <div
             key={obj.id}
@@ -506,12 +586,19 @@ export function ObjectLayer({
             }}
             onPointerDown={(e) => onObjectPointerDown(e, obj, "move")}
           >
-            <ObjectContent obj={obj} />
+            <ObjectContent
+              obj={obj}
+              pageInfo={pageInfo}
+              editingId={editingId}
+              setEditingId={setEditingId}
+              updateObject={updateObject}
+              isDragging={localDrag?.id === obj.id}
+            />
           </div>
         );
       })}
 
-      {/* 选择框和手柄：独立 overlay，始终跟随当前 rect */}
+      {/* Selection frame + handles: separate overlay, always follows current rect */}
       {selectedIds.length > 0 && (
         <>
           {selectedIds.map((id) => {
@@ -520,7 +607,7 @@ export function ObjectLayer({
             const rect =
               localDrag && localDrag.id === id ? localDrag.rect : obj.rect;
             const css = pdfRectToCss(rect, pageInfo, 1);
-            const border = 2 / zoom; // 屏幕上恒定 2px
+            const border = 2 / zoom; // constant 2px on screen
             const handleSize = 8 / zoom;
             return (
               <React.Fragment key={`sel-${id}`}>
@@ -606,7 +693,7 @@ export function ObjectLayer({
         </>
       )}
 
-      {/* debug 框 */}
+      {/* debug boxes */}
       {debug &&
         objects.map((obj) => {
           if (obj.deleted) return null;
@@ -632,22 +719,59 @@ export function ObjectLayer({
   );
 }
 
-/* ───────────── 对象内容渲染 ───────────── */
+/* ───────────── Object content renderer ───────────── */
 
-function ObjectContent({ obj }: { obj: PDFObject }) {
-  const updateObject = usePdfEditor((s) => s.updateObject);
-  const editingId = usePdfEditor((s) => s.editingId);
-  const setEditingId = usePdfEditor((s) => s.setEditingId);
-  const [draft, setDraft] = useState("");
+interface ObjectContentProps {
+  obj: PDFObject;
+  pageInfo: PageInfo;
+  editingId: string | null;
+  setEditingId: (id: string | null) => void;
+  updateObject: (id: string, patch: Partial<PDFObject>) => void;
+  isDragging?: boolean;
+}
+
+function ObjectContent({
+  obj,
+  editingId,
+  setEditingId,
+  updateObject,
+  isDragging = false,
+}: ObjectContentProps) {
+  const isEditing = editingId === obj.id;
+  const isText = obj.kind === "text-run" || obj.kind === "new-text";
+  const textVal = isText ? (obj as TextRunObject | NewTextObject).text : "";
+  const [draft, setDraft] = useState(textVal);
+  const [prevEditing, setPrevEditing] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Sync draft during render when editing starts (official React 19 pattern)
+  if (isEditing && !prevEditing) {
+    setPrevEditing(true);
+    setDraft(textVal);
+  } else if (!isEditing && prevEditing) {
+    setPrevEditing(false);
+  }
+
+  // Focus and select all text when editor opens
+  useEffect(() => {
+    if (isEditing && textareaRef.current) {
+      textareaRef.current.select();
+    }
+  }, [isEditing]);
 
   if (obj.kind === "text-run" || obj.kind === "new-text") {
-    const isEditing = editingId === obj.id;
     const isRun = obj.kind === "text-run";
     const textObj = obj as TextRunObject | NewTextObject;
-
     if (isEditing) {
+      // Opaque background matching the original page colour (no ghost)
+      const bg =
+        isRun
+          ? ((obj as TextRunObject).backgroundColor || "#ffffff")
+          : "#ffffff";
+
       return (
         <textarea
+          ref={textareaRef}
           autoFocus
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -665,15 +789,20 @@ function ObjectContent({ obj }: { obj: PDFObject }) {
                 updateObject(obj.id, { text: draft } as Partial<PDFObject>);
               }
             }
+            // If text unchanged: no dirty, no commit — cover will disappear naturally
           }}
           onKeyDown={(e) => {
-            e.stopPropagation(); // 不让编辑器快捷键收到按键
-            if (e.key === "Enter" && !e.shiftKey) {
+            e.stopPropagation();
+            // Ctrl+Enter or Cmd+Enter = commit (blur)
+            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
               e.preventDefault();
               (e.currentTarget as HTMLTextAreaElement).blur();
             }
+            // Plain Enter = newline (default textarea behaviour; do nothing)
             if (e.key === "Escape") {
               e.preventDefault();
+              // Cancel: restore original text, do not mark dirty
+              setDraft(textObj.text);
               setEditingId(null);
             }
           }}
@@ -686,11 +815,16 @@ function ObjectContent({ obj }: { obj: PDFObject }) {
             fontWeight: textObj.bold ? 700 : 400,
             fontStyle: textObj.italic ? "italic" : "normal",
             color: textObj.color,
-            background: "rgba(16,185,129,0.12)",
-            border: "1px solid #10b981",
-            outline: "none",
+            // Fully opaque background — no ghost from canvas below
+            background: bg,
+            border: "none",
+            outline: "1.5px solid #10b981",
+            outlineOffset: "0px",
+            boxSizing: "border-box",
             resize: "none",
             padding: 0,
+            margin: 0,
+            caretColor: textObj.color || "#000000",
             lineHeight: textObj.lineHeight,
             textAlign: textObj.align,
             textDecoration:
@@ -705,7 +839,8 @@ function ObjectContent({ obj }: { obj: PDFObject }) {
       );
     }
 
-    const showText = isRun ? (obj as TextRunObject).dirty : true;
+    // On double-click: open editor, pre-fill with current text
+    const showText = isRun ? ((obj as TextRunObject).dirty || isDragging) : true;
     return (
       <div
         onDoubleClick={(e) => {

@@ -171,6 +171,8 @@ export function clampRectToPage(rect: RectPt, page: PageInfo): RectPt {
   return { x, y, w, h };
 }
 
+export const clampRect = clampRectToPage;
+
 /** Center of a PDF-space rect. */
 export function rectCenterPt(r: RectPt): { x: number; y: number } {
   return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
