@@ -1,6 +1,12 @@
 "use client";
 import React, { useState } from "react";
+import dynamic from "next/dynamic";
 import JSZip from "jszip";
+
+const PreviewPanel = dynamic(
+  () => import("@/components/preview/PreviewPanel").then((m) => m.PreviewPanel),
+  { ssr: false }
+);
 import * as yaml from "js-yaml";
 import {
   Archive,
@@ -275,8 +281,10 @@ export function UtilityToolEngine({ tool }: { tool: ToolDefinition }) {
   };
 
   return (
-    <div className="space-y-6">
-      <FileUploadZone
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+      {/* Left Column: Upload & Utility Controls */}
+      <div className="lg:col-span-7 space-y-6">
+        <FileUploadZone
         accept={tool.inputFormats}
         multiple={isMulti}
         maxSizeMB={tool.maxFileSizeMB || 200}
@@ -567,6 +575,12 @@ export function UtilityToolEngine({ tool }: { tool: ToolDefinition }) {
           }}
         />
       )}
+      </div>
+
+      {/* Right Column: Sticky Live Preview */}
+      <div className="lg:col-span-5 lg:sticky lg:top-24">
+        <PreviewPanel files={files} />
+      </div>
     </div>
   );
 }

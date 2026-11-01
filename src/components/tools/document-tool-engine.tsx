@@ -1,7 +1,13 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
 import { useEditor, useEditorState, EditorContent } from "@tiptap/react";
+
+const PreviewPanel = dynamic(
+  () => import("@/components/preview/PreviewPanel").then((m) => m.PreviewPanel),
+  { ssr: false }
+);
 import { StarterKit } from "@tiptap/starter-kit";
 import { Underline } from "@tiptap/extension-underline";
 import { TextAlign } from "@tiptap/extension-text-align";
@@ -754,18 +760,23 @@ export function DocumentToolEngine({ tool }: { tool: ToolDefinition }) {
 
   if (isNewTabEditor) {
     return (
-      <div className="space-y-6">
-        <FileUploadZone
-          accept={tool.inputFormats}
-          onFilesSelected={handleFiles}
-          disabled={importing}
-        />
-        {importing && (
-          <div className="flex items-center justify-center p-6 text-primary border rounded-xl bg-card">
-            <Loader2 className="w-6 h-6 animate-spin mr-3" />
-            Opening in full-screen editor…
-          </div>
-        )}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        <div className="lg:col-span-7 space-y-6">
+          <FileUploadZone
+            accept={tool.inputFormats}
+            onFilesSelected={handleFiles}
+            disabled={importing}
+          />
+          {importing && (
+            <div className="flex items-center justify-center p-6 text-primary border rounded-xl bg-card">
+              <Loader2 className="w-6 h-6 animate-spin mr-3" />
+              Opening in full-screen editor…
+            </div>
+          )}
+        </div>
+        <div className="lg:col-span-5 lg:sticky lg:top-24">
+          <PreviewPanel files={files} />
+        </div>
       </div>
     );
   }
@@ -773,8 +784,9 @@ export function DocumentToolEngine({ tool }: { tool: ToolDefinition }) {
   /* ─────────── Render: inline editor UI ─────────── */
 
   return (
-    <div className="space-y-6">
-      <FileUploadZone
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+      <div className="lg:col-span-7 space-y-6">
+        <FileUploadZone
         accept={tool.inputFormats}
         multiple={tool.id === "docx-merge"}
         maxSizeMB={tool.maxFileSizeMB || 50}
@@ -1055,6 +1067,12 @@ export function DocumentToolEngine({ tool }: { tool: ToolDefinition }) {
           }}
         />
       )}
+      </div>
+
+      {/* Right Column: Sticky Live Preview */}
+      <div className="lg:col-span-5 lg:sticky lg:top-24">
+        <PreviewPanel files={files} />
+      </div>
     </div>
   );
 }

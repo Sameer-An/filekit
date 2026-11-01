@@ -33,7 +33,14 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { ProcessingJob, createJob } from "@/lib/job-store";
+import dynamic from "next/dynamic";
+import type { PreviewEffects } from "@/components/preview/types";
 import { formatBytes } from "@/lib/utils";
+
+const PreviewPanel = dynamic(
+  () => import("@/components/preview/PreviewPanel").then((m) => m.PreviewPanel),
+  { ssr: false },
+);
 import {
   canvasToBlob,
   fileToCanvas,
@@ -297,9 +304,59 @@ export function ImageToolEngine({ tool }: { tool: ToolDefinition }) {
     }
   };
 
+  const previewEffects: PreviewEffects = React.useMemo(() => {
+    return {
+      rotateDeg: tool.id === "image-rotate" ? rotateDeg : undefined,
+      flipH: tool.id === "image-rotate" ? flipH : undefined,
+      flipV: tool.id === "image-rotate" ? flipV : undefined,
+      brightness: tool.id === "image-filters" ? brightness : 100,
+      contrast: tool.id === "image-filters" ? contrast : 100,
+      saturation: tool.id === "image-filters" ? saturation : 100,
+      grayscale: tool.id === "image-filters" ? grayscale : 0,
+      resizeWidth:
+        tool.id === "image-resize"
+          ? parseInt(resizeWidth, 10) || undefined
+          : undefined,
+      resizeHeight:
+        tool.id === "image-resize"
+          ? maintainAspect
+            ? undefined
+            : parseInt(resizeHeight, 10) || undefined
+          : undefined,
+      targetFormat:
+        tool.id === "image-convert" || tool.id === "image-batch-convert"
+          ? targetFormat
+          : undefined,
+      quality:
+        tool.id === "image-compress" ||
+        tool.id === "image-batch-compress" ||
+        tool.id === "image-convert"
+          ? quality
+          : undefined,
+      watermarkText:
+        tool.id === "image-watermark" ? watermarkText : undefined,
+    };
+  }, [
+    tool.id,
+    rotateDeg,
+    flipH,
+    flipV,
+    brightness,
+    contrast,
+    saturation,
+    grayscale,
+    resizeWidth,
+    resizeHeight,
+    maintainAspect,
+    targetFormat,
+    quality,
+    watermarkText,
+  ]);
+
   return (
-    <div className="space-y-6">
-      <FileUploadZone
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+      <div className="order-2 lg:order-1 lg:col-span-7 space-y-6">
+        <FileUploadZone
         accept={tool.inputFormats}
         multiple={isMulti}
         maxSizeMB={tool.maxFileSizeMB || 50}
@@ -615,6 +672,18 @@ export function ImageToolEngine({ tool }: { tool: ToolDefinition }) {
           }}
         />
       )}
+      </div>
+
+      <div className="order-1 lg:order-2 lg:col-span-5">
+        <PreviewPanel
+          files={files}
+          effects={previewEffects}
+          onRemoveFile={(idx) => {
+            const next = files.filter((_, i) => i !== idx);
+            handleFiles(next);
+          }}
+        />
+      </div>
     </div>
   );
 }

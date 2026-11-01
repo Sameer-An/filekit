@@ -52,7 +52,14 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { ProcessingJob, createJob } from "@/lib/job-store";
+import dynamic from "next/dynamic";
+import type { PreviewEffects } from "@/components/preview/types";
 import { downloadBlob, formatBytes, uint8ArrayToBlob } from "@/lib/utils";
+
+const PreviewPanel = dynamic(
+  () => import("@/components/preview/PreviewPanel").then((m) => m.PreviewPanel),
+  { ssr: false },
+);
 import { extractPdfText } from "@/lib/pdf-text-extractor";
 import { canvasesToPdf, canvasToBlob, renderPdfPages } from "@/lib/pdf-pages";
 import { fileToJpegBytes } from "@/lib/image-ops";
@@ -908,9 +915,40 @@ export function PdfToolEngine({ tool }: { tool: ToolDefinition }) {
 
   /* ───────────── UI ───────────── */
 
+  const previewEffects: PreviewEffects = React.useMemo(() => {
+    return {
+      pdfRotation: tool.id === "pdf-rotate" ? parseInt(rotateAngle, 10) : undefined,
+      watermarkText: tool.id === "pdf-watermark" ? watermarkText : undefined,
+      watermarkOpacity: tool.id === "pdf-watermark" ? watermarkOpacity : undefined,
+      watermarkPosition: tool.id === "pdf-watermark" ? watermarkPosition : undefined,
+      watermarkFontSize: tool.id === "pdf-watermark" ? watermarkFontSize : undefined,
+      watermarkColor: tool.id === "pdf-watermark" ? watermarkColor : undefined,
+      pageNumbers:
+        tool.id === "pdf-page-numbers"
+          ? {
+              position: numberPosition,
+              start: pageNumStart,
+              format: pageNumFormat,
+            }
+          : undefined,
+    };
+  }, [
+    tool.id,
+    rotateAngle,
+    watermarkText,
+    watermarkOpacity,
+    watermarkPosition,
+    watermarkFontSize,
+    watermarkColor,
+    numberPosition,
+    pageNumStart,
+    pageNumFormat,
+  ]);
+
   return (
-    <div className="space-y-6">
-      <FileUploadZone
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+      <div className="order-2 lg:order-1 lg:col-span-7 space-y-6">
+        <FileUploadZone
         accept={tool.inputFormats}
         multiple={isMulti}
         maxSizeMB={tool.maxFileSizeMB || 200}
@@ -1994,6 +2032,18 @@ export function PdfToolEngine({ tool }: { tool: ToolDefinition }) {
           />
         </div>
       )}
+      </div>
+
+      <div className="order-1 lg:order-2 lg:col-span-5">
+        <PreviewPanel
+          files={files}
+          effects={previewEffects}
+          onRemoveFile={(idx) => {
+            const next = files.filter((_, i) => i !== idx);
+            handleFiles(next);
+          }}
+        />
+      </div>
     </div>
   );
 }
