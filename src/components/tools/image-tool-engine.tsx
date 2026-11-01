@@ -84,7 +84,7 @@ export function ImageToolEngine({ tool }: { tool: ToolDefinition }) {
   const [icoSize, setIcoSize] = useState("64");
 
   const isMulti =
-    tool.multiFile || tool.id.includes("batch") || tool.id === "image-to-pdf";
+    tool.multiFile || tool.id.includes("batch");
 
   const handleFiles = async (selected: File[]) => {
     setFiles(selected);
@@ -156,28 +156,7 @@ export function ImageToolEngine({ tool }: { tool: ToolDefinition }) {
         outputFilename = `images_batch_${Date.now()}.zip`;
       }
 
-      // ─── 2. IMAGE TO PDF ───────────────────────────────────────────────────
-      else if (tool.id === "image-to-pdf") {
-        const pdfDoc = await PDFDocument.create();
-        for (let i = 0; i < files.length; i++) {
-          const jpg = await fileToJpegBytes(files[i], 0.92);
-          const embedded = await pdfDoc.embedJpg(jpg);
-          const page = pdfDoc.addPage([embedded.width, embedded.height]);
-          page.drawImage(embedded, {
-            x: 0,
-            y: 0,
-            width: embedded.width,
-            height: embedded.height,
-          });
-        }
-        const bytes = await pdfDoc.save();
 
-        // FIX 2: Replaced `as any` with a proper ArrayBuffer cast for TS 5.7+
-        outputBlob = new Blob([bytes as unknown as Uint8Array<ArrayBuffer>], {
-          type: "application/pdf",
-        });
-        outputFilename = `images_${Date.now()}.pdf`;
-      }
 
       // ─── 3. SINGLE IMAGE OPERATIONS ─────────────────────────────────────────
       else if (tool.id === "image-metadata") {

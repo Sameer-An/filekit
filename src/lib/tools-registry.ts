@@ -107,16 +107,29 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
   {
     id: "images-to-pdf",
     title: "Images to PDF",
-    description: "Combine JPG, PNG, or WebP images into a single PDF file.",
+    description: "Combine JPG, PNG, WebP, GIF, BMP, or AVIF images into a single aligned PDF document.",
     category: "pdf",
-    inputFormats: ["jpg", "jpeg", "png", "webp"],
+    inputFormats: ["jpg", "jpeg", "png", "webp", "gif", "bmp", "avif", "heic"],
     outputFormats: ["pdf"],
     mode: "browser",
     status: "available",
     icon: "FileImage",
-    keywords: ["images to pdf", "jpg to pdf", "png to pdf", "combine images"],
+    keywords: [
+      "images to pdf",
+      "image to pdf",
+      "jpg to pdf",
+      "png to pdf",
+      "combine images",
+      "image",
+      "jpg",
+      "png",
+      "photo to pdf",
+      "photos to pdf",
+      "pictures to pdf",
+      "convert",
+    ],
     popular: true,
-    maxFileSizeMB: 50,
+    maxFileSizeMB: 100,
     multiFile: true,
   },
   {
@@ -396,21 +409,7 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     keywords: ["watermark", "text overlay", "logo", "branding", "image"],
     maxFileSizeMB: 50,
   },
-  {
-    id: "image-to-pdf",
-    title: "Image to PDF",
-    description: "Convert one or more images into a single PDF document.",
-    category: "image",
-    inputFormats: ["jpg", "jpeg", "png", "webp"],
-    outputFormats: ["pdf"],
-    mode: "browser",
-    status: "available",
-    icon: "FileImage",
-    keywords: ["image to pdf", "jpg to pdf", "png to pdf", "convert"],
-    popular: true,
-    maxFileSizeMB: 50,
-    multiFile: true,
-  },
+
   // {
   //   id: 'image-metadata',
   //   title: 'EXIF Metadata Viewer',
@@ -1017,7 +1016,8 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 export function getToolById(id: string): ToolDefinition | undefined {
-  return TOOL_REGISTRY.find((t) => t.id === id);
+  const targetId = id === "image-to-pdf" ? "images-to-pdf" : id;
+  return TOOL_REGISTRY.find((t) => t.id === targetId);
 }
 
 export function getToolsByCategory(category: ToolCategory): ToolDefinition[] {

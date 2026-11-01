@@ -252,7 +252,7 @@ export function PdfToolEngine({ tool }: { tool: ToolDefinition }) {
   } | null>(null);
   const [copiedText, setCopiedText] = useState<boolean>(false);
 
-  const isMulti = tool.id === "pdf-merge" || tool.id === "images-to-pdf";
+  const isMulti = tool.id === "pdf-merge";
 
   /* ───────────── File handlers ───────────── */
 
@@ -545,35 +545,7 @@ export function PdfToolEngine({ tool }: { tool: ToolDefinition }) {
           "application/pdf",
         );
         outputName = `merged_${Date.now()}.pdf`;
-      } else if (tool.id === "images-to-pdf") {
 
-      /* ─── 7. IMAGES TO PDF ────────────────────────────────────────── */
-        const pdfDoc = await PDFDocument.create();
-        for (let i = 0; i < files.length; i++) {
-          setJob((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  progress: Math.round(((i + 1) / files.length) * 85),
-                  message: `Embedding image ${i + 1}…`,
-                }
-              : null,
-          );
-          const jpgBytes = await fileToJpegBytes(files[i], 0.92);
-          const img = await pdfDoc.embedJpg(jpgBytes);
-          const page = pdfDoc.addPage([img.width, img.height]);
-          page.drawImage(img, {
-            x: 0,
-            y: 0,
-            width: img.width,
-            height: img.height,
-          });
-        }
-        outputBlob = uint8ArrayToBlob(
-          await pdfDoc.save({ useObjectStreams: true }),
-          "application/pdf",
-        );
-        outputName = `images_combined_${Date.now()}.pdf`;
       } else if (tool.id === "pdf-split") {
 
       /* ─── 8. SPLIT (4 modes) ──────────────────────────────────────── */

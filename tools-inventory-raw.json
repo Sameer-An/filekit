@@ -322,22 +322,6 @@
     ]
   },
   {
-    "id": "image-to-pdf",
-    "title": "Image to PDF",
-    "category": "image",
-    "mode": "browser",
-    "description": "Convert one or more images into a single PDF document.",
-    "inFormats": [
-      "jpg",
-      "jpeg",
-      "png",
-      "webp"
-    ],
-    "outFormats": [
-      "pdf"
-    ]
-  },
-  {
     "id": "image-metadata",
     "title": "EXIF Metadata Viewer",
     "category": "image",

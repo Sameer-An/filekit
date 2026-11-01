@@ -12,6 +12,15 @@ const nextConfig: NextConfig = {
     };
     return config;
   },
+  async redirects() {
+    return [
+      {
+        source: "/tools/image-to-pdf",
+        destination: "/tools/images-to-pdf",
+        permanent: true,
+      },
+    ];
+  },
   async headers() {
     return [
       {

@@ -40,7 +40,6 @@ Status Legend:
 | `image-rotate` | Rotate & Flip Image | Browser | `.jpg`, `.png`, `.webp`, `.gif` | `.jpg`, `.png`, `.webp` | 90°/180° rotation with horizontal and vertical flip mirroring. | **Verified & Functional** |
 | `image-filters` | Image Filters | Browser | `.jpg`, `.png`, `.webp` | `.jpg`, `.png`, `.webp` | Sliders for Brightness, Contrast, Saturation, and Grayscale filters. | **Verified & Functional** |
 | `image-watermark` | Watermark Image | Browser | `.jpg`, `.png`, `.webp` | `.jpg`, `.png`, `.webp` | Draws customizable text watermark with outline and fill on canvas. | **Verified & Functional** |
-| `image-to-pdf` | Image to PDF | Browser | `.jpg`, `.png`, `.webp` | `.pdf` | Converts individual or multiple images into a standalone PDF document. | **Verified & Functional** |
 | `image-metadata` | EXIF Metadata Viewer | Browser | `.jpg`, `.png`, `.tiff`, `.heic` | Display | Extracts and formats camera, lens, exposure, GPS, and date metadata via `exifr`. | **Verified & Functional** |
 | `image-remove-exif` | Remove EXIF Data | Browser | `.jpg`, `.png`, `.webp` | `.jpg`, `.png` | Strips all metadata by redrawing pure image pixels to a clean canvas. | **Verified & Functional** |
 | `image-batch-convert` | Batch Image Convert | Browser | `.jpg`, `.png`, `.webp`, `.gif` | `.zip` | Batch processes multiple images into target format and downloads a unified ZIP. | **Verified & Functional** |
