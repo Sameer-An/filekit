@@ -58,14 +58,36 @@ export type ToolId =
   | "checkmark";
 
 export type FontFamilyId =
+  // Sans-serif
   | "Arial"
   | "Helvetica"
+  | "Verdana"
+  | "Tahoma"
+  | "Trebuchet MS"
+  | "Segoe UI"
+  | "Calibri"
+  | "Roboto"
+  | "Open Sans"
+  | "Lato"
+  | "Montserrat"
+  | "Poppins"
+  | "Inter"
+  | "Noto Sans"
+  // Serif
   | "Times New Roman"
   | "Georgia"
-  | "Courier New"
   | "Cambria"
   | "Garamond"
-  | "Noto Sans";
+  | "Palatino"
+  | "Merriweather"
+  | "Playfair Display"
+  // Monospace
+  | "Courier New"
+  | "Consolas"
+  | "Roboto Mono"
+  // Display
+  | "Comic Sans MS"
+  | "Impact";
 
 export interface BaseObject {
   id: string;

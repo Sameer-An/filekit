@@ -9,6 +9,7 @@ import React, {
   useState,
 } from "react";
 import { usePdfEditor } from "@/lib/pdf-editor/store";
+import type { PDFObject } from "@/lib/pdf-editor/types";
 import { PageCanvas } from "./PageCanvas";
 import {
   clampRect,
@@ -105,7 +106,7 @@ export function PageViewport() {
           const dxPt = p1.x - p0.x;
           const dyPt = p1.y - p0.y;
 
-          st.commit("Nudge object", (d) => {
+          st.commit("Nudge objects", (d) => {
             for (const id of st.selectedIds) {
               const obj = d.objects[id];
               if (!obj || obj.locked || obj.deleted) continue;
@@ -113,10 +114,19 @@ export function PageViewport() {
                 { ...obj.rect, x: obj.rect.x + dxPt, y: obj.rect.y + dyPt },
                 curPageInfo,
               );
-              obj.rect = nextRect;
+              const patch: Record<string, unknown> = { rect: nextRect };
               if (obj.kind === "text-run" || obj.kind === "image-placement") {
-                obj.dirty = true;
+                patch.dirty = true;
+                // CRITICAL: capture the ORIGINAL rect before we change it, so the
+                // cover layer paints over the old pixels. Without this, the old text
+                // remains visible behind the new one (the "ghost" bug).
+                if (!obj.origRect) {
+                  patch.origRect = { ...obj.rect };
+                }
               }
+              // Create a NEW object (do not mutate in place) so undo has a clean
+              // snapshot of the previous state.
+              d.objects[id] = { ...obj, ...patch } as PDFObject;
             }
           });
         }

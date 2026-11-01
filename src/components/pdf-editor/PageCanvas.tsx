@@ -74,6 +74,10 @@ function PageCanvasImpl({
       extracting.add(uid);
       try {
         // 1 px = 1 pt copy, so sampling is cheap and the main canvas can stay GPU-backed.
+        // IMPORTANT: `sample` is at 1pt = 1px. Both `sampler` (background) and
+        // `sourceCanvas` (text-colour fallback) MUST use THIS canvas, not the
+        // scaled `source`, otherwise pdfRectToCss(..., zoom=1) samples the
+        // wrong pixels.
         const sample = document.createElement("canvas");
         sample.width = Math.max(1, Math.round(wPt));
         sample.height = Math.max(1, Math.round(hPt));
@@ -83,8 +87,14 @@ function PageCanvasImpl({
 
         const sampler = makeBackgroundSampler(sample, pageInfo, 1);
 
+        const pdfjs = await getPdfjs();
         const runs = await extractTextRuns(pdfPage, pageInfo, {
           sampleBackground: sampler,
+          pdfjsModule: pdfjs,
+          // FIX: use `sample` (1pt=1px) so `zoomForSampling: 1` is correct.
+          sourceCanvas: sample,
+          pageInfoForSampling: pageInfo,
+          zoomForSampling: 1,
         });
 
         // Pass the `source` canvas so moving an image extracts its pixels directly from the rendered page
@@ -221,8 +231,6 @@ function PageCanvasImpl({
         style={{ width: wrapperW, height: wrapperH }}
       />
 
-      {showGrid && <GridOverlay pageInfo={pageInfo} />}
-
       <PageOverlayPreview
         pageInfo={pageInfo}
         pageIndex={pageIndex}
@@ -235,6 +243,16 @@ function PageCanvasImpl({
         zoom={zoom}
         debug={debug}
       />
+
+      {/* Grid moved to the top so covers don't hide it */}
+      {showGrid && <GridOverlay pageInfo={pageInfo} />}
+
+      {/* Grid is moved here and z-[100] so it shows ON TOP of the white covers */}
+      {showGrid && (
+        <div className="absolute inset-0 z-[100] pointer-events-none">
+          <GridOverlay pageInfo={pageInfo} />
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,13 @@
 // src/components/pdf-editor/ObjectLayer.tsx
 "use client";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Lock } from "lucide-react";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { useShallow } from "zustand/react/shallow";
 import { usePdfEditor, usePageObjects } from "@/lib/pdf-editor/store";
 import type {
@@ -11,7 +18,12 @@ import type {
   NewTextObject,
   HighlightObject,
 } from "@/lib/pdf-editor/types";
-import { pdfRectToCss, cssRectToPdf, snapPt, cssToPdfPt } from "@/lib/pdf-editor/coords";
+import {
+  pdfRectToCss,
+  cssRectToPdf,
+  snapPt,
+  cssToPdfPt,
+} from "@/lib/pdf-editor/coords";
 
 interface ObjectLayerProps {
   pageIndex: number;
@@ -79,7 +91,10 @@ export function ObjectLayer({
     id: string;
     rect: RectPt;
   } | null>(null);
-  const [localGroupDrag, setLocalGroupDrag] = useState<Record<string, RectPt> | null>(null);
+  const [localGroupDrag, setLocalGroupDrag] = useState<Record<
+    string,
+    RectPt
+  > | null>(null);
 
   /** Drag candidate (not yet over threshold) */
   const pendingRef = useRef<{
@@ -216,7 +231,12 @@ export function ObjectLayer({
           };
           break;
         case "strike":
-          obj = { ...base, kind: "strike", color: "#111111", strokeWidth: 1.5 };
+          obj = {
+            ...base,
+            kind: "strike",
+            color: "#111111",
+            strokeWidth: 1.5,
+          };
           break;
         case "whiteout":
           obj = { ...base, kind: "whiteout", color: "#ffffff" };
@@ -291,7 +311,9 @@ export function ObjectLayer({
           currentY: e.clientY - r.top,
           active: true,
           additive: isAdditive,
-          initialSelection: isAdditive ? usePdfEditor.getState().selectedIds : [],
+          initialSelection: isAdditive
+            ? usePdfEditor.getState().selectedIds
+            : [],
         };
         if (!isAdditive) {
           selectObjects([]);
@@ -323,7 +345,7 @@ export function ObjectLayer({
     mode: "move" | "resize",
     handle?: string,
   ) => {
-    if (obj.locked || obj.deleted) return;
+    if (obj.deleted) return;
     e.stopPropagation();
 
     const isMultiKey = e.shiftKey || e.ctrlKey || e.metaKey;
@@ -336,7 +358,12 @@ export function ObjectLayer({
       selectObjects([obj.id]);
     }
 
-    const idsToDrag = selectedSet.has(obj.id) ? Array.from(selectedSet) : [obj.id];
+    // Locked: allow selection (so the panel can show "Unlock") but no drag.
+    if (obj.locked) return;
+
+    const idsToDrag = selectedSet.has(obj.id)
+      ? Array.from(selectedSet)
+      : [obj.id];
     const startRects: Record<string, RectPt> = {};
     for (const id of idsToDrag) {
       const o = objects.find((item) => item.id === id);
@@ -377,7 +404,9 @@ export function ObjectLayer({
         const cssRect = { left, top, width: w, height: h };
         const pdfRect = cssRectToPdf(cssRect, pageInfo, 1);
         const hits = objects
-          .filter((o) => !o.deleted && !o.locked && rectsIntersect(o.rect, pdfRect))
+          .filter(
+            (o) => !o.deleted && !o.locked && rectsIntersect(o.rect, pdfRect),
+          )
           .map((o) => o.id);
         const nextSelected = drag.additive
           ? Array.from(new Set([...drag.initialSelection, ...hits]))
@@ -567,12 +596,15 @@ export function ObjectLayer({
             for (const id of ids) {
               const r = localGroupDrag[id];
               const o = d.objects[id];
-              if (r && o) {
-                o.rect = r;
-                if (o.kind === "text-run" || o.kind === "image-placement") {
-                  o.dirty = true;
+              if (!r || !o) continue;
+              const patch: Record<string, unknown> = { rect: r };
+              if (o.kind === "text-run" || o.kind === "image-placement") {
+                patch.dirty = true;
+                if (!o.origRect) {
+                  patch.origRect = { ...o.rect };
                 }
               }
+              d.objects[id] = { ...o, ...patch } as PDFObject;
             }
           });
         } else if (localDrag && localDrag.id === pending.id) {
@@ -629,7 +661,8 @@ export function ObjectLayer({
       ──────────────────────────────────────────────────────────────────── */}
       {objects.map((obj) => {
         if (obj.kind === "text-run") {
-          const isDragging = localDrag?.id === obj.id || Boolean(localGroupDrag?.[obj.id]);
+          const isDragging =
+            localDrag?.id === obj.id || Boolean(localGroupDrag?.[obj.id]);
           const needsCover =
             obj.dirty || obj.deleted || editingId === obj.id || isDragging;
           if (!needsCover) return null;
@@ -721,7 +754,8 @@ export function ObjectLayer({
       {objects.map((obj) => {
         if (obj.deleted) return null;
         const rect =
-          localDrag && localDrag.id === obj.id ? localDrag.rect : obj.rect;
+          localGroupDrag?.[obj.id] ??
+          (localDrag && localDrag.id === obj.id ? localDrag.rect : obj.rect);
         const css = pdfRectToCss(rect, pageInfo, 1);
         return (
           <div
@@ -740,6 +774,11 @@ export function ObjectLayer({
             }}
             onPointerDown={(e) => onObjectPointerDown(e, obj, "move")}
           >
+            {obj.locked && (
+              <div className="absolute -top-2 -right-2 z-30 pointer-events-none bg-amber-500 text-white rounded-full p-1 shadow-md">
+                <Lock className="w-3 h-3" />
+              </div>
+            )}
             <ObjectContent
               obj={obj}
               pageInfo={pageInfo}
@@ -755,11 +794,15 @@ export function ObjectLayer({
       {/* Selection frame + handles: separate overlay, always follows current rect */}
       {selectedIds.length > 0 && (
         <>
+          {/* eslint-disable-next-line react-hooks/refs -- event handlers are
+              deferred; the compiler's tracing flags them, but refs are only
+              touched on pointer events, never during render. */}
           {selectedIds.map((id) => {
             const obj = objects.find((o) => o.id === id);
             if (!obj) return null;
             const rect =
-              localGroupDrag?.[id] ?? (localDrag && localDrag.id === id ? localDrag.rect : obj.rect);
+              localGroupDrag?.[id] ??
+              (localDrag && localDrag.id === id ? localDrag.rect : obj.rect);
             const css = pdfRectToCss(rect, pageInfo, 1);
             const border = 2 / zoom; // constant 2px on screen
             const handleSize = 8 / zoom;
@@ -776,71 +819,73 @@ export function ObjectLayer({
                     boxSizing: "border-box",
                   }}
                 />
-                {(
-                  [
-                    ["nw", "nwse-resize", -handleSize / 2, -handleSize / 2],
+                {!obj.locked &&
+                  !obj.deleted &&
+                  (
                     [
-                      "n",
-                      "ns-resize",
-                      css.width / 2 - handleSize / 2,
-                      -handleSize / 2,
-                    ],
-                    [
-                      "ne",
-                      "nesw-resize",
-                      css.width - handleSize / 2,
-                      -handleSize / 2,
-                    ],
-                    [
-                      "e",
-                      "ew-resize",
-                      css.width - handleSize / 2,
-                      css.height / 2 - handleSize / 2,
-                    ],
-                    [
-                      "se",
-                      "nwse-resize",
-                      css.width - handleSize / 2,
-                      css.height - handleSize / 2,
-                    ],
-                    [
-                      "s",
-                      "ns-resize",
-                      css.width / 2 - handleSize / 2,
-                      css.height - handleSize / 2,
-                    ],
-                    [
-                      "sw",
-                      "nesw-resize",
-                      -handleSize / 2,
-                      css.height - handleSize / 2,
-                    ],
-                    [
-                      "w",
-                      "ew-resize",
-                      -handleSize / 2,
-                      css.height / 2 - handleSize / 2,
-                    ],
-                  ] as const
-                ).map(([h, cursor, dx, dy]) => (
-                  <div
-                    key={h}
-                    className="absolute z-30"
-                    onPointerDown={(e) =>
-                      onObjectPointerDown(e, obj, "resize", h)
-                    }
-                    style={{
-                      left: css.left + dx,
-                      top: css.top + dy,
-                      width: handleSize,
-                      height: handleSize,
-                      background: "#10b981",
-                      border: `${1 / zoom}px solid white`,
-                      cursor,
-                      pointerEvents: "auto",
-                    }}
-                  />
-                ))}
+                      ["nw", "nwse-resize", -handleSize / 2, -handleSize / 2],
+                      [
+                        "n",
+                        "ns-resize",
+                        css.width / 2 - handleSize / 2,
+                        -handleSize / 2,
+                      ],
+                      [
+                        "ne",
+                        "nesw-resize",
+                        css.width - handleSize / 2,
+                        -handleSize / 2,
+                      ],
+                      [
+                        "e",
+                        "ew-resize",
+                        css.width - handleSize / 2,
+                        css.height / 2 - handleSize / 2,
+                      ],
+                      [
+                        "se",
+                        "nwse-resize",
+                        css.width - handleSize / 2,
+                        css.height - handleSize / 2,
+                      ],
+                      [
+                        "s",
+                        "ns-resize",
+                        css.width / 2 - handleSize / 2,
+                        css.height - handleSize / 2,
+                      ],
+                      [
+                        "sw",
+                        "nesw-resize",
+                        -handleSize / 2,
+                        css.height - handleSize / 2,
+                      ],
+                      [
+                        "w",
+                        "ew-resize",
+                        -handleSize / 2,
+                        css.height / 2 - handleSize / 2,
+                      ],
+                    ] as const
+                  ).map(([h, cursor, dx, dy]) => (
+                    <div
+                      key={h}
+                      className="absolute z-30"
+                      onPointerDown={(e) =>
+                        onObjectPointerDown(e, obj, "resize", h)
+                      }
+                      style={{
+                        left: css.left + dx,
+                        top: css.top + dy,
+                        width: handleSize,
+                        height: handleSize,
+                        background: "#10b981",
+                        border: `${1 / zoom}px solid white`,
+                        cursor,
+                        pointerEvents: "auto",
+                      }}
+                    />
+                  ))}
               </React.Fragment>
             );
           })}
@@ -913,23 +958,79 @@ function ObjectContent({
     }
   }, [isEditing]);
 
+  const textDivRef = useRef<HTMLDivElement | null>(null);
+
+  // Auto-measure text height and expand the selection box automatically
+  useLayoutEffect(() => {
+    if (
+      (obj.kind === "text-run" || obj.kind === "new-text") &&
+      !isEditing &&
+      !isDragging
+    ) {
+      const el = textDivRef.current;
+      if (!el) return;
+
+      // Use rAF to avoid layout thrashing during React render phase
+      const raf = requestAnimationFrame(() => {
+        const st = usePdfEditor.getState();
+        const cur = st.objects[obj.id];
+        if (!cur) return;
+
+        const scrollH = el.scrollHeight;
+        // If the text overflows the box vertically, expand the object's height
+        if (scrollH > cur.rect.h + 0.5) {
+          st.updateObjectTransient(obj.id, {
+            rect: { ...cur.rect, h: scrollH },
+          });
+        }
+      });
+
+      return () => cancelAnimationFrame(raf);
+    }
+  }, [
+    textVal,
+    obj.kind,
+    obj.id,
+    obj.rect.h,
+    obj.rect.w,
+    isEditing,
+    isDragging,
+  ]);
+
   if (obj.kind === "text-run" || obj.kind === "new-text") {
     const isRun = obj.kind === "text-run";
     const textObj = obj as TextRunObject | NewTextObject;
     if (isEditing) {
       // Opaque background matching the original page colour (no ghost)
-      const bg =
-        isRun
-          ? ((obj as TextRunObject).backgroundColor || "#ffffff")
-          : "#ffffff";
+      const bg = isRun
+        ? (obj as TextRunObject).backgroundColor || "#ffffff"
+        : "#ffffff";
 
       return (
         <textarea
           ref={textareaRef}
           autoFocus
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => {
+          onChange={(e) => {
+            setDraft(e.target.value);
+            const ta = e.currentTarget;
+            // Auto-grow the object's height as the user types, so the selection
+            // frame grows with the content (WYSIWYG). Transient update = no
+            // history churn.
+            requestAnimationFrame(() => {
+              const st = usePdfEditor.getState();
+              const cur = st.objects[obj.id];
+              if (!cur) return;
+              if (ta.scrollHeight > cur.rect.h + 1) {
+                st.updateObjectTransient(obj.id, {
+                  rect: { ...cur.rect, h: ta.scrollHeight },
+                });
+              }
+            });
+          }}
+          onBlur={(e) => {
+            const ta = e.currentTarget as HTMLTextAreaElement;
+            const measuredHeightPt = Math.max(obj.rect.h, ta.scrollHeight);
             setEditingId(null);
             if (draft !== textObj.text) {
               if (draft.trim() === "" && obj.kind === "new-text") {
@@ -940,10 +1041,16 @@ function ObjectContent({
                   );
                 });
               } else {
-                updateObject(obj.id, { text: draft } as Partial<PDFObject>);
+                updateObject(obj.id, {
+                  text: draft,
+                  rect: { ...obj.rect, h: measuredHeightPt },
+                } as Partial<PDFObject>);
               }
+            } else if (measuredHeightPt > obj.rect.h + 1) {
+              updateObject(obj.id, {
+                rect: { ...obj.rect, h: measuredHeightPt },
+              } as Partial<PDFObject>);
             }
-            // If text unchanged: no dirty, no commit — cover will disappear naturally
           }}
           onKeyDown={(e) => {
             e.stopPropagation();
@@ -972,8 +1079,7 @@ function ObjectContent({
             // Fully opaque background — no ghost from canvas below
             background: bg,
             border: "none",
-            outline: "1.5px solid #10b981",
-            outlineOffset: "0px",
+            outline: "none",
             boxSizing: "border-box",
             resize: "none",
             padding: 0,
@@ -981,6 +1087,9 @@ function ObjectContent({
             caretColor: textObj.color || "#000000",
             lineHeight: textObj.lineHeight,
             textAlign: textObj.align,
+            whiteSpace: "pre-wrap",
+            overflowWrap: "break-word",
+            wordBreak: "break-word",
             textDecoration:
               [
                 textObj.underline ? "underline" : "",
@@ -994,9 +1103,10 @@ function ObjectContent({
     }
 
     // On double-click: open editor, pre-fill with current text
-    const showText = isRun ? ((obj as TextRunObject).dirty || isDragging) : true;
+    const showText = isRun ? (obj as TextRunObject).dirty || isDragging : true;
     return (
       <div
+        ref={textDivRef}
         onDoubleClick={(e) => {
           e.stopPropagation();
           setDraft(textObj.text);
@@ -1004,7 +1114,9 @@ function ObjectContent({
         }}
         style={{
           width: "100%",
+          maxWidth: "100%",
           height: "100%",
+          display: "block",
           fontFamily: textObj.fontFamily,
           fontSize: textObj.fontSize,
           fontWeight: textObj.bold ? 700 : 400,
@@ -1015,6 +1127,8 @@ function ObjectContent({
           userSelect: "none",
           pointerEvents: "auto",
           whiteSpace: "pre-wrap",
+          overflowWrap: "break-word",
+          wordBreak: "break-word",
           textAlign: textObj.align,
           lineHeight: textObj.lineHeight,
           letterSpacing: textObj.letterSpacing,

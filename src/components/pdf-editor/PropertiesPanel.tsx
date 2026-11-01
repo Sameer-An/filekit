@@ -33,6 +33,7 @@
     const objects = usePdfEditor((s) => s.objects);
     const selectedIds = usePdfEditor((s) => s.selectedIds);
     const updateObject = usePdfEditor((s) => s.updateObject);
+    const setLocked = usePdfEditor((s) => s.setLocked);
     const deleteSelected = usePdfEditor((s) => s.deleteSelected);
     const duplicateSelected = usePdfEditor((s) => s.duplicateSelected);
     const bringForward = usePdfEditor((s) => s.bringForward);
@@ -79,7 +80,7 @@
         if (selected.length < 3) return;
         commit("Distribute", (d) => {
         const sorted = [...selected].sort((a, b) =>
-            axis === "x" ? a.rect.x - b.rect.x : a.rect.y - b.rect.y
+            axis === "x" ? a.rect.x - b.rect.x : a.rect.y - b.rect.y,
         );
         const first = sorted[0];
         const last = sorted[sorted.length - 1];
@@ -157,7 +158,11 @@
                 </IconBtn>
                 <IconBtn
                     onClick={() => distribute("x")}
-                    title={selected.length >= 3 ? "Distribute horizontally" : "Distribute needs 3+ objects"}
+                    title={
+                    selected.length >= 3
+                        ? "Distribute horizontally"
+                        : "Distribute needs 3+ objects"
+                    }
                 >
                     <AlignHorizontalSpaceBetween className="w-3.5 h-3.5" />
                 </IconBtn>
@@ -175,7 +180,11 @@
                 </IconBtn>
                 <IconBtn
                     onClick={() => distribute("y")}
-                    title={selected.length >= 3 ? "Distribute vertically" : "Distribute needs 3+ objects"}
+                    title={
+                    selected.length >= 3
+                        ? "Distribute vertically"
+                        : "Distribute needs 3+ objects"
+                    }
                 >
                     <AlignVerticalSpaceBetween className="w-3.5 h-3.5" />
                 </IconBtn>
@@ -283,9 +292,7 @@
                 </div>
                 {single && (
                 <button
-                    onClick={() =>
-                    updateObject(single.id, { locked: !single.locked })
-                    }
+                    onClick={() => setLocked(single.id, !single.locked)}
                     className="w-full flex items-center justify-center gap-1.5 px-2 py-1 rounded bg-zinc-900 border border-zinc-800 hover:bg-zinc-800"
                 >
                     {single.locked ? (

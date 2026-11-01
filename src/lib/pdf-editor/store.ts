@@ -104,6 +104,7 @@ export interface PdfEditorState {
   toggleObjectSelection: (id: string) => void;
   clearSelection: () => void;
   setEditingId: (id: string | null) => void;
+  setLocked: (id: string, locked: boolean) => void;
 
   addObject: (obj: PDFObject) => void;
   updateObject: (id: string, patch: Partial<PDFObject>) => void;
@@ -416,6 +417,15 @@ export const usePdfEditor = create<PdfEditorState>((set, get) => ({
   clearSelection: () => set({ selectedIds: [] }),
 
   setEditingId: (id) => set({ editingId: id }),
+  setLocked: (id, locked) => {
+    const obj = get().objects[id];
+    if (!obj || obj.locked === locked) return;
+    get().commit(locked ? "Lock object" : "Unlock object", (d) => {
+      const cur = d.objects[id];
+      if (!cur) return;
+      d.objects[id] = { ...cur, locked } as PDFObject;
+    });
+  },
 
   addObject: (obj) => {
     get().commit(`Add ${obj.kind}`, (d) => {
@@ -677,11 +687,14 @@ export const usePdfEditor = create<PdfEditorState>((set, get) => ({
 
   updateObjectTransient: (id, patch) => {
     const current = get().objects[id];
-
     if (!current) return;
-
     const next = { ...current, ...patch } as PDFObject;
-
+    if (
+      (next.kind === "text-run" || next.kind === "image-placement") &&
+      !next.origRect
+    ) {
+      next.origRect = { ...current.rect };
+    }
     set({
       objects: { ...get().objects, [id]: next },
       dirty: true,

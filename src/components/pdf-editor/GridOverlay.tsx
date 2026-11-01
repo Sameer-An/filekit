@@ -44,7 +44,7 @@
             position: "absolute",
             inset: 0,
             pointerEvents: "none",
-            zIndex: 10,
+            zIndex: 100,
             backgroundImage,
             backgroundRepeat: "no-repeat",
             backgroundSize: "100% 100%",
