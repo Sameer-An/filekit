@@ -120,6 +120,14 @@ export function PageViewport() {
             }
           });
         }
+      } else if (mod && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        const pageIds = st.pageObjectIds[st.currentPage] ?? [];
+        const selectable = pageIds.filter((id) => {
+          const o = st.objects[id];
+          return o && !o.deleted && !o.locked;
+        });
+        st.selectObjects(selectable);
       } else if (mod && e.key.toLowerCase() === "z") {
         e.preventDefault();
         if (e.shiftKey) st.redo();

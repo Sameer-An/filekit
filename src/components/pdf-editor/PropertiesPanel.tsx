@@ -22,6 +22,8 @@
     AlignStartHorizontal,
     AlignCenterHorizontal,
     AlignEndHorizontal,
+    AlignHorizontalSpaceBetween,
+    AlignVerticalSpaceBetween,
     } from "lucide-react";
     import { usePdfEditor } from "@/lib/pdf-editor/store";
     import type { PDFObject, ShapeObject } from "@/lib/pdf-editor/types";
@@ -54,7 +56,7 @@
         const maxY = Math.max(...rects.map((r) => r.y + r.h));
         for (const o of selected) {
             const obj = d.objects[o.id];
-            if (!obj) continue;
+            if (!obj || obj.locked || obj.deleted) continue;
             if (axis === "x") {
             if (mode === "start") obj.rect = { ...obj.rect, x: minX };
             if (mode === "center")
@@ -65,6 +67,50 @@
             if (mode === "center")
                 obj.rect = { ...obj.rect, y: (minY + maxY) / 2 - obj.rect.h / 2 };
             if (mode === "end") obj.rect = { ...obj.rect, y: maxY - obj.rect.h };
+            }
+            if (obj.kind === "text-run" || obj.kind === "image-placement") {
+            obj.dirty = true;
+            }
+        }
+        });
+    };
+
+    const distribute = (axis: "x" | "y") => {
+        if (selected.length < 3) return;
+        commit("Distribute", (d) => {
+        const sorted = [...selected].sort((a, b) =>
+            axis === "x" ? a.rect.x - b.rect.x : a.rect.y - b.rect.y
+        );
+        const first = sorted[0];
+        const last = sorted[sorted.length - 1];
+
+        if (axis === "x") {
+            const totalSpan = last.rect.x + last.rect.w - first.rect.x;
+            const totalObjW = sorted.reduce((sum, o) => sum + o.rect.w, 0);
+            const gap = (totalSpan - totalObjW) / (sorted.length - 1);
+            let curX = first.rect.x;
+            for (const o of sorted) {
+            const obj = d.objects[o.id];
+            if (!obj || obj.locked || obj.deleted) continue;
+            obj.rect = { ...obj.rect, x: curX };
+            if (obj.kind === "text-run" || obj.kind === "image-placement") {
+                obj.dirty = true;
+            }
+            curX += o.rect.w + gap;
+            }
+        } else {
+            const totalSpan = last.rect.y + last.rect.h - first.rect.y;
+            const totalObjH = sorted.reduce((sum, o) => sum + o.rect.h, 0);
+            const gap = (totalSpan - totalObjH) / (sorted.length - 1);
+            let curY = first.rect.y;
+            for (const o of sorted) {
+            const obj = d.objects[o.id];
+            if (!obj || obj.locked || obj.deleted) continue;
+            obj.rect = { ...obj.rect, y: curY };
+            if (obj.kind === "text-run" || obj.kind === "image-placement") {
+                obj.dirty = true;
+            }
+            curY += o.rect.h + gap;
             }
         }
         });
@@ -96,7 +142,7 @@
                 <div className="text-zinc-400">
                 {selected.length} objects selected
                 </div>
-                <div className="grid grid-cols-3 gap-1">
+                <div className="grid grid-cols-4 gap-1">
                 <IconBtn onClick={() => align("x", "start")} title="Align left">
                     <AlignStartVertical className="w-3.5 h-3.5" />
                 </IconBtn>
@@ -109,8 +155,14 @@
                 <IconBtn onClick={() => align("x", "end")} title="Align right">
                     <AlignEndVertical className="w-3.5 h-3.5" />
                 </IconBtn>
-                <IconBtn onClick={() => align("y", "start")} title="Align bottom">
-                    <AlignStartHorizontal className="w-3.5 h-3.5" />
+                <IconBtn
+                    onClick={() => distribute("x")}
+                    title={selected.length >= 3 ? "Distribute horizontally" : "Distribute needs 3+ objects"}
+                >
+                    <AlignHorizontalSpaceBetween className="w-3.5 h-3.5" />
+                </IconBtn>
+                <IconBtn onClick={() => align("y", "end")} title="Align top">
+                    <AlignEndHorizontal className="w-3.5 h-3.5" />
                 </IconBtn>
                 <IconBtn
                     onClick={() => align("y", "center")}
@@ -118,8 +170,14 @@
                 >
                     <AlignCenterHorizontal className="w-3.5 h-3.5" />
                 </IconBtn>
-                <IconBtn onClick={() => align("y", "end")} title="Align top">
-                    <AlignEndHorizontal className="w-3.5 h-3.5" />
+                <IconBtn onClick={() => align("y", "start")} title="Align bottom">
+                    <AlignStartHorizontal className="w-3.5 h-3.5" />
+                </IconBtn>
+                <IconBtn
+                    onClick={() => distribute("y")}
+                    title={selected.length >= 3 ? "Distribute vertically" : "Distribute needs 3+ objects"}
+                >
+                    <AlignVerticalSpaceBetween className="w-3.5 h-3.5" />
                 </IconBtn>
                 </div>
             </div>

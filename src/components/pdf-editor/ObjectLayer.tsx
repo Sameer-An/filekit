@@ -20,6 +20,15 @@ interface ObjectLayerProps {
   debug?: boolean;
 }
 
+function rectsIntersect(a: RectPt, b: RectPt): boolean {
+  return !(
+    a.x + a.w < b.x ||
+    a.x > b.x + b.w ||
+    a.y + a.h < b.y ||
+    a.y > b.y + b.h
+  );
+}
+
 const DRAG_THRESHOLD = 4; // screen px
 // +0.5pt on each side matches drawCover() in export.ts
 const COVER_PAD = 0.5;
@@ -70,6 +79,7 @@ export function ObjectLayer({
     id: string;
     rect: RectPt;
   } | null>(null);
+  const [localGroupDrag, setLocalGroupDrag] = useState<Record<string, RectPt> | null>(null);
 
   /** Drag candidate (not yet over threshold) */
   const pendingRef = useRef<{
@@ -79,7 +89,25 @@ export function ObjectLayer({
     startX: number;
     startY: number;
     startRect: RectPt;
+    startRects: Record<string, RectPt>;
     started: boolean;
+  } | null>(null);
+
+  /** Marquee selection drag */
+  const marqueeDragRef = useRef<{
+    startX: number;
+    startY: number;
+    currentX: number;
+    currentY: number;
+    active: boolean;
+    additive: boolean;
+    initialSelection: string[];
+  } | null>(null);
+  const [marqueeRect, setMarqueeRect] = useState<{
+    x: number;
+    y: number;
+    w: number;
+    h: number;
   } | null>(null);
 
   /** Highlight drag rect (screen coords) */
@@ -251,22 +279,39 @@ export function ObjectLayer({
         return;
       }
 
-      if (activeTool !== "select") {
-        if (activeTool === "image") return;
+      if (activeTool === "select") {
         const root = rootRef.current;
         if (!root) return;
         const r = root.getBoundingClientRect();
-        const px = { x: e.clientX - r.left, y: e.clientY - r.top };
-        const pt = cssRectToPdf(
-          { left: px.x, top: px.y, width: 200, height: 40 },
-          pageInfo,
-          1,
-        );
-        createNewObjectAt(pt);
+        const isAdditive = e.shiftKey || e.ctrlKey || e.metaKey;
+        marqueeDragRef.current = {
+          startX: e.clientX - r.left,
+          startY: e.clientY - r.top,
+          currentX: e.clientX - r.left,
+          currentY: e.clientY - r.top,
+          active: true,
+          additive: isAdditive,
+          initialSelection: isAdditive ? usePdfEditor.getState().selectedIds : [],
+        };
+        if (!isAdditive) {
+          selectObjects([]);
+        }
+        (root as HTMLElement).setPointerCapture?.(e.pointerId);
         return;
       }
 
-      selectObjects([]);
+      if (activeTool === "image") return;
+      const root = rootRef.current;
+      if (!root) return;
+      const r = root.getBoundingClientRect();
+      const px = { x: e.clientX - r.left, y: e.clientY - r.top };
+      const pt = cssRectToPdf(
+        { left: px.x, top: px.y, width: 200, height: 40 },
+        pageInfo,
+        1,
+      );
+      createNewObjectAt(pt);
+      return;
     },
     [activeTool, pageInfo, selectObjects, createNewObjectAt],
   );
@@ -281,9 +326,21 @@ export function ObjectLayer({
     if (obj.locked || obj.deleted) return;
     e.stopPropagation();
 
+    const isMultiKey = e.shiftKey || e.ctrlKey || e.metaKey;
+    if (isMultiKey) {
+      toggleObjectSelection(obj.id);
+      return;
+    }
+
     if (!selectedSet.has(obj.id)) {
-      if (e.shiftKey) toggleObjectSelection(obj.id);
-      else selectObjects([obj.id]);
+      selectObjects([obj.id]);
+    }
+
+    const idsToDrag = selectedSet.has(obj.id) ? Array.from(selectedSet) : [obj.id];
+    const startRects: Record<string, RectPt> = {};
+    for (const id of idsToDrag) {
+      const o = objects.find((item) => item.id === id);
+      if (o) startRects[id] = { ...o.rect };
     }
 
     pendingRef.current = {
@@ -293,12 +350,43 @@ export function ObjectLayer({
       startX: e.clientX,
       startY: e.clientY,
       startRect: { ...obj.rect },
+      startRects,
       started: false,
     };
   };
 
   /** Global pointer move: start drag only after threshold */
   const onPointerMove = (e: React.PointerEvent) => {
+    // Marquee selection drag
+    if (marqueeDragRef.current?.active) {
+      const drag = marqueeDragRef.current;
+      const root = rootRef.current;
+      if (!root) return;
+      const r = root.getBoundingClientRect();
+      const x = e.clientX - r.left;
+      const y = e.clientY - r.top;
+      drag.currentX = x;
+      drag.currentY = y;
+      const left = Math.min(drag.startX, x);
+      const top = Math.min(drag.startY, y);
+      const w = Math.abs(x - drag.startX);
+      const h = Math.abs(y - drag.startY);
+      setMarqueeRect({ x: left, y: top, w, h });
+
+      if (w >= 4 || h >= 4) {
+        const cssRect = { left, top, width: w, height: h };
+        const pdfRect = cssRectToPdf(cssRect, pageInfo, 1);
+        const hits = objects
+          .filter((o) => !o.deleted && !o.locked && rectsIntersect(o.rect, pdfRect))
+          .map((o) => o.id);
+        const nextSelected = drag.additive
+          ? Array.from(new Set([...drag.initialSelection, ...hits]))
+          : hits;
+        selectObjects(nextSelected);
+      }
+      return;
+    }
+
     // Highlight drag
     if (highlightDragRef.current?.active) {
       const root = rootRef.current;
@@ -336,6 +424,24 @@ export function ObjectLayer({
     const dxPt = p1.x - p0.x;
     const dyPt = p1.y - p0.y;
     let next = { ...pending.startRect };
+
+    const idsToDrag = Object.keys(pending.startRects || {});
+    if (pending.mode === "move" && idsToDrag.length > 1) {
+      const groupDragRects: Record<string, RectPt> = {};
+      for (const id of idsToDrag) {
+        const start = pending.startRects[id];
+        let x = start.x + dxPt;
+        let y = start.y + dyPt;
+        if (gridSnap && !e.altKey) {
+          x = snapPt(x, 4);
+          y = snapPt(y, 4);
+        }
+        groupDragRects[id] = clampRect({ ...start, x, y }, pageInfo);
+      }
+      setLocalGroupDrag(groupDragRects);
+      setLocalDrag({ id: pending.id, rect: groupDragRects[pending.id] });
+      return;
+    }
 
     if (pending.mode === "move") {
       let x = pending.startRect.x + dxPt;
@@ -434,14 +540,47 @@ export function ObjectLayer({
       return;
     }
 
+    // Marquee commit
+    if (marqueeDragRef.current?.active) {
+      const drag = marqueeDragRef.current;
+      marqueeDragRef.current = null;
+      setMarqueeRect(null);
+      const w = Math.abs(drag.currentX - drag.startX);
+      const h = Math.abs(drag.currentY - drag.startY);
+      if (w < 4 && h < 4 && !drag.additive) {
+        selectObjects([]);
+      }
+      try {
+        (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+      } catch {}
+      return;
+    }
+
     // Drag commit
     const pending = pendingRef.current;
     if (pending) {
       pendingRef.current = null;
-      if (pending.started && localDrag && localDrag.id === pending.id) {
-        updateObject(pending.id, { rect: localDrag.rect });
+      if (pending.started) {
+        const ids = Object.keys(pending.startRects || {});
+        if (pending.mode === "move" && ids.length > 1 && localGroupDrag) {
+          commit("Move objects", (d) => {
+            for (const id of ids) {
+              const r = localGroupDrag[id];
+              const o = d.objects[id];
+              if (r && o) {
+                o.rect = r;
+                if (o.kind === "text-run" || o.kind === "image-placement") {
+                  o.dirty = true;
+                }
+              }
+            }
+          });
+        } else if (localDrag && localDrag.id === pending.id) {
+          updateObject(pending.id, { rect: localDrag.rect });
+        }
       }
       setLocalDrag(null);
+      setLocalGroupDrag(null);
       try {
         (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
       } catch {}
@@ -490,7 +629,7 @@ export function ObjectLayer({
       ──────────────────────────────────────────────────────────────────── */}
       {objects.map((obj) => {
         if (obj.kind === "text-run") {
-          const isDragging = localDrag?.id === obj.id;
+          const isDragging = localDrag?.id === obj.id || Boolean(localGroupDrag?.[obj.id]);
           const needsCover =
             obj.dirty || obj.deleted || editingId === obj.id || isDragging;
           if (!needsCover) return null;
@@ -547,6 +686,21 @@ export function ObjectLayer({
         }
         return null;
       })}
+
+      {/* Marquee selection preview */}
+      {marqueeRect && (
+        <div
+          className="absolute pointer-events-none z-30"
+          style={{
+            left: marqueeRect.x,
+            top: marqueeRect.y,
+            width: marqueeRect.w,
+            height: marqueeRect.h,
+            border: "1px dashed #10b981",
+            background: "rgba(16, 185, 129, 0.12)",
+          }}
+        />
+      )}
 
       {/* Highlight drag preview */}
       {highlightRect && (
@@ -605,7 +759,7 @@ export function ObjectLayer({
             const obj = objects.find((o) => o.id === id);
             if (!obj) return null;
             const rect =
-              localDrag && localDrag.id === id ? localDrag.rect : obj.rect;
+              localGroupDrag?.[id] ?? (localDrag && localDrag.id === id ? localDrag.rect : obj.rect);
             const css = pdfRectToCss(rect, pageInfo, 1);
             const border = 2 / zoom; // constant 2px on screen
             const handleSize = 8 / zoom;
