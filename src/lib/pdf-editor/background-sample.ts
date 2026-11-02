@@ -1,7 +1,7 @@
 // src/lib/pdf-editor/background-sample.ts
 // Sample the background colour of a rect on a rendered page canvas.
 // Used to (a) paint an opaque cover behind redrawn text on export, and
-// (b) colour-match the "editing" textarea inside the overlay.
+// (b) colour-match the rich-text editor inside the overlay.
 //
 // Robustness: we sample a sparse grid (not every pixel) for speed, discard
 // near-transparent pixels (canvases may be painted on transparent bg), and

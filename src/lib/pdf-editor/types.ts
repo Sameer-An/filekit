@@ -101,15 +101,51 @@ export interface BaseObject {
   origRect?: RectPt;
 }
 
+/**
+ * A contiguous span of text with character-level formatting.
+ *
+ * Compatibility model: when a text object has `runs`, `runs` is the source of
+ * truth for content and formatting. Its object-level `text` and formatting
+ * fields are a legacy/plain-text mirror and defaults for run fields that are
+ * omitted. Runtime code must keep these synchronized when mutating text; the
+ * type system cannot enforce that. Objects without `runs` continue to use the
+ * object-level fields for the entire text.
+ *
+ * When `runs` is present, the object-level `text` must equal the concatenation
+ * of each run's `text` for compatibility with legacy readers.
+ */
+export interface StyledTextRun {
+  /** Text content for this segment. */
+  text: string;
+  /** Character styles. Omitted values inherit from the containing text object. */
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strike?: boolean;
+  /** Optional per-run overrides; omitted values inherit from the text object. */
+  fontFamily?: string;
+  fontSize?: Pt;
+  color?: string; // hex
+  letterSpacing?: Pt;
+}
+
 /** A text run detected inside the original PDF. Editable via overlay. */
 export interface TextRunObject extends BaseObject {
   kind: "text-run";
   /** True once the user has committed a change. Untouched runs are skipped on export. */
   dirty: boolean;
-  /** Rendered text shown in the overlay. Updated when the user edits. */
+  /**
+   * Legacy/plain-text mirror shown in the overlay. When `runs` is present this
+   * must be the concatenation of run text for compatibility; `runs` is the
+   * source of truth for content and formatting.
+   */
   text: string;
-  /** Original text, kept so we can revert. */
+  /** Original text, kept so we can revert when `originalRuns` is absent. */
   originalText: string;
+  /** Styled segments. When present, authoritative for content and character formatting. */
+  runs?: StyledTextRun[];
+  /** Original styled segments for revert; absent means use `originalText` + object defaults. */
+  originalRuns?: StyledTextRun[];
   /** Font name reported by pdfjs (`fontName`). */
   sourceFontName: string;
   /** Base font shown in the panel. */
@@ -151,7 +187,14 @@ export interface OverlaySettings {
 
 export interface NewTextObject extends BaseObject {
   kind: "new-text";
+  /**
+   * Legacy/plain-text mirror. When `runs` is present this must be the
+   * concatenation of run text for compatibility; `runs` is the source of truth
+   * for content and formatting.
+   */
   text: string;
+  /** Styled segments. When present, authoritative for content and character formatting. */
+  runs?: StyledTextRun[];
   fontFamily: string;
   fontSize: Pt;
   bold: boolean;

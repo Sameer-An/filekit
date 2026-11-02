@@ -5,6 +5,7 @@ import React, {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -16,6 +17,7 @@ import type {
   RectPt,
   TextRunObject,
   NewTextObject,
+  StyledTextRun,
   HighlightObject,
 } from "@/lib/pdf-editor/types";
 import {
@@ -24,6 +26,10 @@ import {
   snapPt,
   cssToPdfPt,
 } from "@/lib/pdf-editor/coords";
+import {
+  materializeRuns,
+  replaceText,
+} from "@/lib/pdf-editor/text-runs";
 
 interface ObjectLayerProps {
   pageIndex: number;
@@ -281,20 +287,15 @@ export function ObjectLayer({
       if (activeTool === "highlight") {
         const root = rootRef.current;
         if (!root) return;
-        const r = root.getBoundingClientRect();
+        const p = toLocal(root, e, zoom);
         highlightDragRef.current = {
-          startX: e.clientX - r.left,
-          startY: e.clientY - r.top,
-          currentX: e.clientX - r.left,
-          currentY: e.clientY - r.top,
+          startX: p.x,
+          startY: p.y,
+          currentX: p.x,
+          currentY: p.y,
           active: true,
         };
-        setHighlightRect({
-          x: e.clientX - r.left,
-          y: e.clientY - r.top,
-          w: 0,
-          h: 0,
-        });
+        setHighlightRect({ x: p.x, y: p.y, w: 0, h: 0 });
         root.setPointerCapture(e.pointerId);
         return;
       }
@@ -302,13 +303,13 @@ export function ObjectLayer({
       if (activeTool === "select") {
         const root = rootRef.current;
         if (!root) return;
-        const r = root.getBoundingClientRect();
+        const p = toLocal(root, e, zoom);
         const isAdditive = e.shiftKey || e.ctrlKey || e.metaKey;
         marqueeDragRef.current = {
-          startX: e.clientX - r.left,
-          startY: e.clientY - r.top,
-          currentX: e.clientX - r.left,
-          currentY: e.clientY - r.top,
+          startX: p.x,
+          startY: p.y,
+          currentX: p.x,
+          currentY: p.y,
           active: true,
           additive: isAdditive,
           initialSelection: isAdditive
@@ -325,8 +326,7 @@ export function ObjectLayer({
       if (activeTool === "image") return;
       const root = rootRef.current;
       if (!root) return;
-      const r = root.getBoundingClientRect();
-      const px = { x: e.clientX - r.left, y: e.clientY - r.top };
+      const px = toLocal(root, e, zoom);
       const pt = cssRectToPdf(
         { left: px.x, top: px.y, width: 200, height: 40 },
         pageInfo,
@@ -335,7 +335,7 @@ export function ObjectLayer({
       createNewObjectAt(pt);
       return;
     },
-    [activeTool, pageInfo, selectObjects, createNewObjectAt],
+    [activeTool, pageInfo, zoom, selectObjects, createNewObjectAt],
   );
 
   /** Object pointer down: register drag candidate (no capture yet) */
@@ -389,9 +389,7 @@ export function ObjectLayer({
       const drag = marqueeDragRef.current;
       const root = rootRef.current;
       if (!root) return;
-      const r = root.getBoundingClientRect();
-      const x = e.clientX - r.left;
-      const y = e.clientY - r.top;
+      const { x, y } = toLocal(root, e, zoom);
       drag.currentX = x;
       drag.currentY = y;
       const left = Math.min(drag.startX, x);
@@ -420,9 +418,7 @@ export function ObjectLayer({
     if (highlightDragRef.current?.active) {
       const root = rootRef.current;
       if (!root) return;
-      const r = root.getBoundingClientRect();
-      const x = e.clientX - r.left;
-      const y = e.clientY - r.top;
+      const { x, y } = toLocal(root, e, zoom);
       highlightDragRef.current.currentX = x;
       highlightDragRef.current.currentY = y;
       const left = Math.min(highlightDragRef.current.startX, x);
@@ -445,9 +441,11 @@ export function ObjectLayer({
       (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
     }
 
-    const storeZoom = usePdfEditor.getState().zoom;
-    const dxScreen = (e.clientX - pending.startX) / storeZoom;
-    const dyScreen = (e.clientY - pending.startY) / storeZoom;
+    // Use the visual `zoom` prop, not the store zoom, so drag matches the
+    // rendered canvas even if the store value lags behind.
+    const z = zoom || 1;
+    const dxScreen = (e.clientX - pending.startX) / z;
+    const dyScreen = (e.clientY - pending.startY) / z;
     const p0 = cssToPdfPt({ x: 0, y: 0 }, pageInfo, 1);
     const p1 = cssToPdfPt({ x: dxScreen, y: dyScreen }, pageInfo, 1);
     const dxPt = p1.x - p0.x;
@@ -929,159 +927,483 @@ interface ObjectContentProps {
   isDragging?: boolean;
 }
 
+type TextLike = TextRunObject | NewTextObject;
+
+function isTextLikeObject(obj: PDFObject): obj is TextLike {
+  return obj.kind === "text-run" || obj.kind === "new-text";
+}
+
+function textRunStyle(
+  run: StyledTextRun,
+  obj: TextLike,
+): React.CSSProperties {
+  return {
+    fontFamily: run.fontFamily ?? obj.fontFamily,
+    fontSize: run.fontSize ?? obj.fontSize,
+    fontWeight: (run.bold ?? obj.bold) ? 700 : 400,
+    fontStyle: (run.italic ?? obj.italic) ? "italic" : "normal",
+    color: run.color ?? obj.color,
+    letterSpacing: run.letterSpacing ?? obj.letterSpacing,
+    textDecoration: [
+      (run.underline ?? obj.underline) ? "underline" : "",
+      (run.strike ?? obj.strike) ? "line-through" : "",
+    ]
+      .filter(Boolean)
+      .join(" ") || "none",
+  };
+}
+
+function writeRunsToEditor(
+  editor: HTMLDivElement,
+  runs: StyledTextRun[],
+  obj: TextLike,
+): void {
+  const fragment = editor.ownerDocument.createDocumentFragment();
+
+  for (const run of runs) {
+    const span = editor.ownerDocument.createElement("span");
+    span.textContent = run.text;
+    const style = textRunStyle(run, obj);
+    Object.assign(span.style, style);
+    span.style.fontSize = `${run.fontSize ?? obj.fontSize}px`;
+    span.style.letterSpacing = `${run.letterSpacing ?? obj.letterSpacing}px`;
+    fragment.appendChild(span);
+  }
+  editor.replaceChildren(fragment);
+}
+
+function editorTextOffset(
+  root: HTMLDivElement,
+  target: Node,
+  targetOffset: number,
+): number {
+  let count = 0;
+  let result = 0;
+  let found = false;
+
+  const visit = (node: Node): void => {
+    if (found) return;
+    if (node === target) {
+      if (node.nodeType === 3) {
+        count += Math.max(
+          0,
+          Math.min(targetOffset, node.textContent?.length ?? 0),
+        );
+      } else {
+        for (
+          let i = 0;
+          i < Math.min(targetOffset, node.childNodes.length);
+          i++
+        ) {
+          visit(node.childNodes[i]);
+        }
+      }
+      result = count;
+      found = true;
+      return;
+    }
+
+    if (node.nodeType === 3) {
+      count += node.textContent?.length ?? 0;
+      return;
+    }
+    if (node.nodeName === "BR") {
+      count++;
+      return;
+    }
+    for (const child of node.childNodes) visit(child);
+  };
+
+  visit(root);
+  return result;
+}
+
+function readEditorSelection(
+  editor: HTMLDivElement,
+): { start: number; end: number } | null {
+  const selection = editor.ownerDocument.getSelection();
+  if (
+    !selection?.rangeCount ||
+    !selection.anchorNode ||
+    !selection.focusNode ||
+    !editor.contains(selection.anchorNode) ||
+    !editor.contains(selection.focusNode)
+  ) {
+    return null;
+  }
+
+  const anchor = editorTextOffset(
+    editor,
+    selection.anchorNode,
+    selection.anchorOffset,
+  );
+  const focus = editorTextOffset(
+    editor,
+    selection.focusNode,
+    selection.focusOffset,
+  );
+  return { start: Math.min(anchor, focus), end: Math.max(anchor, focus) };
+}
+
+function setEditorSelection(
+  editor: HTMLDivElement,
+  start: number,
+  end: number,
+): void {
+  const doc = editor.ownerDocument;
+  const walker = doc.createTreeWalker(editor, 4);
+  const nodes: Text[] = [];
+  let current = walker.nextNode();
+  while (current) {
+    nodes.push(current as Text);
+    current = walker.nextNode();
+  }
+
+  if (nodes.length === 0) {
+    const node = doc.createTextNode("");
+    editor.appendChild(node);
+    nodes.push(node);
+  }
+
+  const locate = (offset: number): { node: Text; offset: number } => {
+    let remaining = Math.max(0, offset);
+    for (const node of nodes) {
+      if (remaining <= node.length) return { node, offset: remaining };
+      remaining -= node.length;
+    }
+    const last = nodes[nodes.length - 1];
+    return { node: last, offset: last.length };
+  };
+
+  const from = locate(start);
+  const to = locate(end);
+  const range = doc.createRange();
+  range.setStart(from.node, from.offset);
+  range.setEnd(to.node, to.offset);
+  const selection = doc.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+function insertPlainTextAtSelection(editor: HTMLDivElement, text: string): void {
+  const doc = editor.ownerDocument;
+  const selection = doc.getSelection();
+  const range =
+    selection?.rangeCount && editor.contains(selection.anchorNode)
+      ? selection.getRangeAt(0)
+      : doc.createRange();
+
+  if (!selection?.rangeCount || !editor.contains(selection.anchorNode)) {
+    range.selectNodeContents(editor);
+    range.collapse(false);
+  }
+  range.deleteContents();
+  const node = doc.createTextNode(text);
+  range.insertNode(node);
+  range.setStartAfter(node);
+  range.collapse(true);
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  editor.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 function ObjectContent({
   obj,
+  pageInfo,
   editingId,
   setEditingId,
   updateObject,
   isDragging = false,
 }: ObjectContentProps) {
   const isEditing = editingId === obj.id;
-  const isText = obj.kind === "text-run" || obj.kind === "new-text";
-  const textVal = isText ? (obj as TextRunObject | NewTextObject).text : "";
-  const [draft, setDraft] = useState(textVal);
-  const [prevEditing, setPrevEditing] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-
-  // Sync draft during render when editing starts (official React 19 pattern)
-  if (isEditing && !prevEditing) {
-    setPrevEditing(true);
-    setDraft(textVal);
-  } else if (!isEditing && prevEditing) {
-    setPrevEditing(false);
-  }
-
-  // Focus and select all text when editor opens
-  useEffect(() => {
-    if (isEditing && textareaRef.current) {
-      textareaRef.current.select();
-    }
-  }, [isEditing]);
-
+  const textObj = isTextLikeObject(obj) ? obj : null;
+  const runs = useMemo(
+    () => (textObj ? materializeRuns(textObj) : []),
+    [textObj],
+  );
+  const textVal = runs.map((run) => run.text).join("");
+  const runSignature = JSON.stringify(runs);
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const renderedSignatureRef = useRef("");
+  const wasEditingRef = useRef(false);
   const textDivRef = useRef<HTMLDivElement | null>(null);
 
-  // Auto-measure text height and expand the selection box automatically
   useLayoutEffect(() => {
-    if (
-      (obj.kind === "text-run" || obj.kind === "new-text") &&
-      !isEditing &&
-      !isDragging
-    ) {
-      const el = textDivRef.current;
-      if (!el) return;
+    const editor = editorRef.current;
+    if (!isEditing || !textObj || !editor) {
+      if (!isEditing) renderedSignatureRef.current = "";
+      wasEditingRef.current = false;
+      return;
+    }
 
-      // Use rAF to avoid layout thrashing during React render phase
-      const raf = requestAnimationFrame(() => {
-        const st = usePdfEditor.getState();
-        const cur = st.objects[obj.id];
-        if (!cur) return;
+    const changed = renderedSignatureRef.current !== runSignature;
+    if (changed) {
+      const currentSelection = usePdfEditor.getState().textSelection;
+      const shouldRestore =
+        wasEditingRef.current && currentSelection?.objectId === obj.id;
+      writeRunsToEditor(editor, runs, textObj);
+      renderedSignatureRef.current = runSignature;
+      editor.focus();
+      if (shouldRestore) {
+        setEditorSelection(
+          editor,
+          currentSelection.start,
+          currentSelection.end,
+        );
+      } else {
+        setEditorSelection(editor, 0, textVal.length);
+      }
+    }
+    wasEditingRef.current = true;
+  }, [isEditing, obj.id, runSignature, runs, textObj, textVal]);
 
-        const scrollH = el.scrollHeight;
-        // If the text overflows the box vertically, expand the object's height
-        if (scrollH > cur.rect.h + 0.5) {
-          st.updateObjectTransient(obj.id, {
-            rect: { ...cur.rect, h: scrollH },
+  useEffect(() => {
+    if (!isEditing || !textObj) return;
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const updateSelection = () => {
+      const selection = readEditorSelection(editor);
+      if (!selection) return;
+      usePdfEditor.getState().setTextSelection({
+        objectId: obj.id,
+        ...selection,
+      });
+    };
+
+    editor.ownerDocument.addEventListener("selectionchange", updateSelection);
+    return () =>
+      editor.ownerDocument.removeEventListener(
+        "selectionchange",
+        updateSelection,
+      );
+  }, [isEditing, obj.id, textObj]);
+
+  const resizeTextBox = useCallback(
+    (editor: HTMLDivElement) => {
+      const width = editor.scrollWidth;
+      const height = editor.scrollHeight;
+      requestAnimationFrame(() => {
+        const state = usePdfEditor.getState();
+        const current = state.objects[obj.id];
+        if (!current || !isTextLikeObject(current)) return;
+
+        const nextWidth = Math.max(current.rect.w, width);
+        const top = pageInfo.heightPt - current.rect.y - current.rect.h;
+        const maxHeight = Math.max(0, pageInfo.heightPt - top);
+        const nextHeight = Math.min(
+          Math.max(current.rect.h, height),
+          maxHeight,
+        );
+        if (
+          nextWidth > current.rect.w + 0.5 ||
+          nextHeight > current.rect.h + 0.5
+        ) {
+          const maxWidth = Math.max(
+            current.rect.w,
+            pageInfo.widthPt - current.rect.x,
+          );
+          state.updateObjectTransient(obj.id, {
+            rect: {
+              ...current.rect,
+              y: current.rect.y + current.rect.h - nextHeight,
+              w: Math.min(nextWidth, maxWidth),
+              h: nextHeight,
+            },
           });
         }
       });
+    },
+    [obj.id, pageInfo.heightPt, pageInfo.widthPt],
+  );
 
-      return () => cancelAnimationFrame(raf);
+  // Measure the same intrinsically-sized text surface used while editing.
+  useLayoutEffect(() => {
+    if (
+      !textObj ||
+      isEditing ||
+      isDragging ||
+      (textObj.kind === "text-run" && !textObj.dirty)
+    ) {
+      return;
     }
+
+    const el = textDivRef.current;
+    if (!el) return;
+    resizeTextBox(el);
   }, [
     textVal,
-    obj.kind,
     obj.id,
+    textObj?.kind,
+    runSignature,
     obj.rect.h,
     obj.rect.w,
     isEditing,
     isDragging,
+    pageInfo.widthPt,
+    pageInfo.heightPt,
+    resizeTextBox,
+    textObj,
   ]);
 
-  if (obj.kind === "text-run" || obj.kind === "new-text") {
-    const isRun = obj.kind === "text-run";
-    const textObj = obj as TextRunObject | NewTextObject;
+  if (textObj) {
+    const isRun = textObj.kind === "text-run";
     if (isEditing) {
-      // Opaque background matching the original page colour (no ghost)
       const bg = isRun
-        ? (obj as TextRunObject).backgroundColor || "#ffffff"
+        ? textObj.backgroundColor || "#ffffff"
         : "#ffffff";
+      const updateFromEditor = (editor: HTMLDivElement) => {
+        const current = usePdfEditor.getState().objects[obj.id];
+        if (!current || !isTextLikeObject(current)) return;
+        const next = replaceText(current, editor.textContent ?? "");
+        const nextRuns = next.runs ?? materializeRuns(next);
+        renderedSignatureRef.current = JSON.stringify(nextRuns);
+        usePdfEditor.getState().updateObjectTransient(obj.id, {
+          text: next.text,
+          runs: nextRuns,
+        });
+        const selection = readEditorSelection(editor);
+        if (selection) {
+          usePdfEditor.getState().setTextSelection({
+            objectId: obj.id,
+            ...selection,
+          });
+        }
+        resizeTextBox(editor);
+      };
+
+      const finishEditing = () => {
+        const state = usePdfEditor.getState();
+        const current = state.objects[obj.id];
+        const snapshot =
+          state.history.entries[state.history.index]?.objects[obj.id];
+        if (!current || !isTextLikeObject(current)) {
+          setEditingId(null);
+          return;
+        }
+
+        if (current.kind === "new-text" && current.text.trim() === "") {
+          state.commit("Remove empty text", (draft) => {
+            delete draft.objects[obj.id];
+            draft.pageObjectIds = draft.pageObjectIds.map((ids) =>
+              ids.filter((id) => id !== obj.id),
+            );
+          });
+        } else {
+          const currentSignature = JSON.stringify({
+            text: current.text,
+            runs: current.runs ?? null,
+            rect: current.rect,
+          });
+          const savedSignature =
+            snapshot && isTextLikeObject(snapshot)
+              ? JSON.stringify({
+                  text: snapshot.text,
+                  runs: snapshot.runs ?? null,
+                  rect: snapshot.rect,
+                })
+              : "";
+          if (currentSignature !== savedSignature) {
+            updateObject(obj.id, {
+              text: current.text,
+              runs: current.runs,
+              rect: current.rect,
+            } as Partial<PDFObject>);
+          }
+        }
+        setEditingId(null);
+      };
+
+      const cancelEditing = () => {
+        const state = usePdfEditor.getState();
+        const snapshot =
+          state.history.entries[state.history.index]?.objects[obj.id];
+        if (snapshot && isTextLikeObject(snapshot)) {
+          state.updateObjectTransient(obj.id, {
+            text: snapshot.text,
+            runs: snapshot.runs,
+            rect: snapshot.rect,
+          } as Partial<PDFObject>);
+        }
+        setEditingId(null);
+      };
 
       return (
-        <textarea
-          ref={textareaRef}
-          autoFocus
-          value={draft}
-          onChange={(e) => {
-            setDraft(e.target.value);
-            const ta = e.currentTarget;
-            // Auto-grow the object's height as the user types, so the selection
-            // frame grows with the content (WYSIWYG). Transient update = no
-            // history churn.
-            requestAnimationFrame(() => {
-              const st = usePdfEditor.getState();
-              const cur = st.objects[obj.id];
-              if (!cur) return;
-              if (ta.scrollHeight > cur.rect.h + 1) {
-                st.updateObjectTransient(obj.id, {
-                  rect: { ...cur.rect, h: ta.scrollHeight },
-                });
-              }
-            });
+        <div
+          ref={editorRef}
+          contentEditable
+          role="textbox"
+          aria-label="Edit text"
+          aria-multiline="true"
+          suppressContentEditableWarning
+          spellCheck={false}
+          onInput={(e) => updateFromEditor(e.currentTarget)}
+          onBlur={finishEditing}
+          onPaste={(e) => {
+            e.preventDefault();
+            insertPlainTextAtSelection(
+              e.currentTarget,
+              e.clipboardData.getData("text/plain"),
+            );
           }}
-          onBlur={(e) => {
-            const ta = e.currentTarget as HTMLTextAreaElement;
-            const measuredHeightPt = Math.max(obj.rect.h, ta.scrollHeight);
-            setEditingId(null);
-            if (draft !== textObj.text) {
-              if (draft.trim() === "" && obj.kind === "new-text") {
-                usePdfEditor.getState().commit("Remove empty text", (d) => {
-                  delete d.objects[obj.id];
-                  d.pageObjectIds = d.pageObjectIds.map((ids) =>
-                    ids.filter((id) => id !== obj.id),
-                  );
-                });
-              } else {
-                updateObject(obj.id, {
-                  text: draft,
-                  rect: { ...obj.rect, h: measuredHeightPt },
-                } as Partial<PDFObject>);
-              }
-            } else if (measuredHeightPt > obj.rect.h + 1) {
-              updateObject(obj.id, {
-                rect: { ...obj.rect, h: measuredHeightPt },
-              } as Partial<PDFObject>);
+          onBeforeInput={(e) => {
+            const inputType = (e.nativeEvent as InputEvent).inputType;
+            if (
+              inputType === "insertParagraph" ||
+              inputType === "insertLineBreak"
+            ) {
+              e.preventDefault();
+              insertPlainTextAtSelection(e.currentTarget, "\n");
             }
           }}
           onKeyDown={(e) => {
             e.stopPropagation();
-            // Ctrl+Enter or Cmd+Enter = commit (blur)
             if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
               e.preventDefault();
-              (e.currentTarget as HTMLTextAreaElement).blur();
+              e.currentTarget.blur();
             }
-            // Plain Enter = newline (default textarea behaviour; do nothing)
+            if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) {
+              e.preventDefault();
+              insertPlainTextAtSelection(e.currentTarget, "\n");
+            }
             if (e.key === "Escape") {
               e.preventDefault();
-              // Cancel: restore original text, do not mark dirty
-              setDraft(textObj.text);
-              setEditingId(null);
+              cancelEditing();
             }
           }}
           onPointerDown={(e) => e.stopPropagation()}
+          onMouseUp={(e) => {
+            const selection = readEditorSelection(e.currentTarget);
+            if (selection) {
+              usePdfEditor.getState().setTextSelection({
+                objectId: obj.id,
+                ...selection,
+              });
+            }
+          }}
+          onKeyUp={(e) => {
+            const selection = readEditorSelection(e.currentTarget);
+            if (selection) {
+              usePdfEditor.getState().setTextSelection({
+                objectId: obj.id,
+                ...selection,
+              });
+            }
+          }}
           style={{
-            width: "100%",
-            height: "100%",
+            width: "max-content",
+            minWidth: "100%",
+            maxWidth: Math.max(1, pageInfo.widthPt - textObj.rect.x),
+            minHeight: "100%",
             fontFamily: textObj.fontFamily,
             fontSize: textObj.fontSize,
             fontWeight: textObj.bold ? 700 : 400,
             fontStyle: textObj.italic ? "italic" : "normal",
             color: textObj.color,
-            // Fully opaque background — no ghost from canvas below
             background: bg,
             border: "none",
             outline: "none",
             boxSizing: "border-box",
-            resize: "none",
             padding: 0,
             margin: 0,
             caretColor: textObj.color || "#000000",
@@ -1097,25 +1419,26 @@ function ObjectContent({
               ]
                 .filter(Boolean)
                 .join(" ") || "none",
+            letterSpacing: textObj.letterSpacing,
           }}
         />
       );
     }
 
-    // On double-click: open editor, pre-fill with current text
-    const showText = isRun ? (obj as TextRunObject).dirty || isDragging : true;
+    const showText =
+      textObj.kind === "new-text" || textObj.dirty || isDragging;
     return (
       <div
         ref={textDivRef}
         onDoubleClick={(e) => {
           e.stopPropagation();
-          setDraft(textObj.text);
           setEditingId(obj.id);
         }}
         style={{
-          width: "100%",
-          maxWidth: "100%",
-          height: "100%",
+          width: "max-content",
+          minWidth: "100%",
+          maxWidth: Math.max(1, pageInfo.widthPt - textObj.rect.x),
+          minHeight: "100%",
           display: "block",
           fontFamily: textObj.fontFamily,
           fontSize: textObj.fontSize,
@@ -1142,7 +1465,13 @@ function ObjectContent({
               .join(" ") || "none",
         }}
       >
-        {showText ? textObj.text : ""}
+        {showText
+          ? runs.map((run, index) => (
+              <span key={index} style={textRunStyle(run, textObj)}>
+                {run.text}
+              </span>
+            ))
+          : null}
       </div>
     );
   }
@@ -1369,6 +1698,17 @@ function ObjectContent({
   }
 
   return null;
+}
+
+/** Pointer position in page points: removes the visual CSS zoom scale. */
+function toLocal(
+  root: HTMLElement,
+  e: { clientX: number; clientY: number },
+  zoom: number,
+) {
+  const r = root.getBoundingClientRect();
+  const z = zoom || 1;
+  return { x: (e.clientX - r.left) / z, y: (e.clientY - r.top) / z };
 }
 
 function clampRect(rect: RectPt, page: PageInfo): RectPt {

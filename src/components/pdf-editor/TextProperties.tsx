@@ -14,7 +14,13 @@ import type {
   PDFObject,
   TextRunObject,
   NewTextObject,
+  StyledTextRun,
 } from "@/lib/pdf-editor/types";
+import {
+  applyStyleToRange,
+  styleForRange,
+  type StyledRunPatch,
+} from "@/lib/pdf-editor/text-runs";
 
 // ─── Font catalogue ──────────────────────────────────────────────────────────
 
@@ -99,6 +105,8 @@ function pushRecentFont(font: string): void {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type TextLike = TextRunObject | NewTextObject;
+type StyleKey = "bold" | "italic" | "underline" | "strike";
+type StyleState = boolean | "Mixed";
 
 function isTextLike(o: PDFObject | undefined): o is TextLike {
   return !!o && (o.kind === "text-run" || o.kind === "new-text");
@@ -110,6 +118,105 @@ function mixed<T>(arr: T[], key: keyof T): T[keyof T] | "Mixed" {
   return arr.every((a) => a[key] === first) ? first : "Mixed";
 }
 
+function objectStyleValue(
+  obj: TextLike,
+  key: StyleKey,
+  selection?: { objectId: string; start: number; end: number } | null,
+): StyleState {
+  if (
+    selection?.objectId === obj.id &&
+    selection.start < selection.end
+  ) {
+    return (
+      styleForRange(obj, key, selection.start, selection.end) ??
+      (obj[key] === true)
+    );
+  }
+
+  const runs = obj.runs;
+  if (runs && runs.length > 0) {
+    let first: boolean | undefined;
+    for (const run of runs) {
+      const value = run[key] ?? obj[key] ?? false;
+      if (first === undefined) {
+        first = value;
+      } else if (first !== value) {
+        return "Mixed";
+      }
+    }
+    return first ?? false;
+  }
+  return obj[key] === true;
+}
+
+function mixedStyle(
+  selected: TextLike[],
+  key: StyleKey,
+  selection?: { objectId: string; start: number; end: number } | null,
+): StyleState {
+  const hasRange =
+    selection !== null &&
+    selection !== undefined &&
+    selection.start < selection.end;
+  const rangeTargets = hasRange
+    ? selected.filter((obj) => obj.id === selection.objectId)
+    : [];
+  const targets = rangeTargets.length > 0 ? rangeTargets : selected;
+  let first: boolean | undefined;
+  for (const obj of targets) {
+    const value = objectStyleValue(obj, key, selection);
+    if (value === "Mixed") return "Mixed";
+    if (first === undefined) {
+      first = value;
+    } else if (first !== value) {
+      return "Mixed";
+    }
+  }
+  return first ?? false;
+}
+
+function mutateTextStyle(
+  draft: { objects: Record<string, PDFObject> },
+  id: string,
+  key: StyleKey,
+  value: boolean,
+  selection?: { objectId: string; start: number; end: number } | null,
+): void {
+  const cur = draft.objects[id];
+  if (!cur || (cur.kind !== "text-run" && cur.kind !== "new-text")) return;
+
+  if (
+    selection?.objectId === id &&
+    selection.start < selection.end
+  ) {
+    const stylePatch: StyledRunPatch = { [key]: value };
+    draft.objects[id] = applyStyleToRange(
+      cur,
+      selection.start,
+      selection.end,
+      stylePatch,
+    ) as PDFObject;
+    return;
+  }
+
+  const patch = { [key]: value } as Partial<TextLike>;
+  let next = { ...cur, ...patch } as TextLike;
+
+  if (next.runs && next.runs.length > 0) {
+    const runPatch = { [key]: value } as Partial<StyledTextRun>;
+    next = {
+      ...next,
+      runs: next.runs.map((run) => ({ ...run, ...runPatch })),
+    };
+  }
+
+  if (next.kind === "text-run") {
+    next = { ...next, dirty: true };
+  }
+
+  draft.objects[id] = next as PDFObject;
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function TextProperties() {
@@ -117,11 +224,12 @@ export function TextProperties() {
   // ALL HOOKS FIRST — no early return above this line
   // ══════════════════════════════════════════════════════════════════════════
 
-  const { selectedIds, objects, commit } = usePdfEditor(
+  const { selectedIds, objects, commit, textSelection } = usePdfEditor(
     useShallow((s) => ({
       selectedIds: s.selectedIds,
       objects: s.objects,
       commit: s.commit,
+      textSelection: s.textSelection,
     })),
   );
 
@@ -141,24 +249,23 @@ export function TextProperties() {
       const sel = st.selectedIds.map((id) => st.objects[id]).filter(isTextLike);
       if (sel.length === 0) return;
 
-      const firstNow = sel[0];
-
-      let key: "bold" | "italic" | "underline" | null = null;
+      let key: StyleKey | null = null;
       if (e.key === "b" || e.key === "B") key = "bold";
       else if (e.key === "i" || e.key === "I") key = "italic";
       else if (e.key === "u" || e.key === "U") key = "underline";
       if (!key) return;
 
       e.preventDefault();
-      const patch = { [key]: !firstNow[key] } as Partial<TextLike>;
+      const range =
+        st.textSelection && st.textSelection.start < st.textSelection.end
+          ? st.textSelection
+          : null;
+      const nextValue = mixedStyle(sel, key, range) === true ? false : true;
 
       st.commit("Text style", (d) => {
         for (const obj of sel) {
-          const cur = d.objects[obj.id];
-          if (!cur || (cur.kind !== "text-run" && cur.kind !== "new-text"))
-            continue;
-          const extra = cur.kind === "text-run" ? { dirty: true } : {};
-          d.objects[obj.id] = { ...cur, ...extra, ...patch } as PDFObject;
+          if (range && obj.id !== range.objectId) continue;
+          mutateTextStyle(d, obj.id, key, nextValue, range);
         }
       });
     };
@@ -196,13 +303,38 @@ export function TextProperties() {
         if (!cur || (cur.kind !== "text-run" && cur.kind !== "new-text"))
           continue;
         const extra = cur.kind === "text-run" ? { dirty: true } : {};
-        d.objects[obj.id] = { ...cur, ...extra, ...patch } as PDFObject;
+        const runPatch: Partial<StyledTextRun> = {};
+        if (patch.fontFamily !== undefined)
+          runPatch.fontFamily = patch.fontFamily;
+        if (patch.fontSize !== undefined) runPatch.fontSize = patch.fontSize;
+        if (patch.color !== undefined) runPatch.color = patch.color;
+        if (patch.letterSpacing !== undefined)
+          runPatch.letterSpacing = patch.letterSpacing;
+        d.objects[obj.id] = {
+          ...cur,
+          ...extra,
+          ...patch,
+          ...(cur.runs && Object.keys(runPatch).length > 0
+            ? { runs: cur.runs.map((run) => ({ ...run, ...runPatch })) }
+            : {}),
+        } as PDFObject;
       }
     });
   };
 
-  const toggle = (key: "bold" | "italic" | "underline" | "strike") => {
-    apply({ [key]: !first[key] } as Partial<TextLike>);
+  const toggle = (key: StyleKey) => {
+    const range =
+      textSelection && textSelection.start < textSelection.end
+        ? textSelection
+        : null;
+    const nextValue =
+      mixedStyle(selected, key, range) === true ? false : true;
+    commit("Text style", (d) => {
+      for (const obj of selected) {
+        if (range && obj.id !== range.objectId) continue;
+        mutateTextStyle(d, obj.id, key, nextValue, range);
+      }
+    });
   };
 
   const applyFont = (font: string) => {
@@ -221,6 +353,7 @@ export function TextProperties() {
           ...cur,
           dirty: false,
           text: cur.originalText,
+          runs: cur.originalRuns,
           origRect: undefined,
         } as PDFObject;
       }
@@ -235,10 +368,14 @@ export function TextProperties() {
   const lh = mixed(selected, "lineHeight");
   const ls = mixed(selected, "letterSpacing");
   const op = mixed(selected, "opacity");
-  const isBold = mixed(selected, "bold");
-  const isItalic = mixed(selected, "italic");
-  const isUnderline = mixed(selected, "underline");
-  const isStrike = mixed(selected, "strike");
+  const range =
+    textSelection && textSelection.start < textSelection.end
+      ? textSelection
+      : null;
+  const isBold = mixedStyle(selected, "bold", range);
+  const isItalic = mixedStyle(selected, "italic", range);
+  const isUnderline = mixedStyle(selected, "underline", range);
+  const isStrike = mixedStyle(selected, "strike", range);
 
   const displayFontSize =
     fs === "Mixed" ? "" : String(Math.round((fs as number) * 10) / 10);

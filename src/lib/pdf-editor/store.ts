@@ -63,6 +63,7 @@ export interface PdfEditorState {
   selectedIds: string[];
   activeTool: ToolId;
   editingId: string | null;
+  textSelection: { objectId: string; start: number; end: number } | null;
 
   zoom: number;
   fitMode: "none" | "width" | "page";
@@ -104,6 +105,9 @@ export interface PdfEditorState {
   toggleObjectSelection: (id: string) => void;
   clearSelection: () => void;
   setEditingId: (id: string | null) => void;
+  setTextSelection: (
+    selection: { objectId: string; start: number; end: number } | null,
+  ) => void;
   setLocked: (id: string, locked: boolean) => void;
 
   addObject: (obj: PDFObject) => void;
@@ -180,6 +184,7 @@ export const usePdfEditor = create<PdfEditorState>((set, get) => ({
   selectedIds: [],
   activeTool: "select",
   editingId: null,
+  textSelection: null,
 
   zoom: 1,
   fitMode: "width",
@@ -236,6 +241,7 @@ export const usePdfEditor = create<PdfEditorState>((set, get) => ({
       selectedIds: [],
       activeTool: "select",
       editingId: null,
+      textSelection: null,
       zoom: 1,
       fitMode: "width",
       currentPage: 0,
@@ -277,6 +283,7 @@ export const usePdfEditor = create<PdfEditorState>((set, get) => ({
       selectedIds: [],
       activeTool: "select",
       editingId: null,
+      textSelection: null,
       zoom: snap.zoom,
       fitMode: "none",
       currentPage: snap.currentPage,
@@ -374,6 +381,7 @@ export const usePdfEditor = create<PdfEditorState>((set, get) => ({
       pageOps: snapshot.pageOps,
       selectedIds: [],
       editingId: null,
+      textSelection: null,
       dirty: true,
     });
   },
@@ -395,14 +403,20 @@ export const usePdfEditor = create<PdfEditorState>((set, get) => ({
       pageOps: snapshot.pageOps,
       selectedIds: [],
       editingId: null,
+      textSelection: null,
       dirty: true,
     });
   },
 
   selectTool: (tool) =>
-    set({ activeTool: tool, selectedIds: [], editingId: null }),
+    set({
+      activeTool: tool,
+      selectedIds: [],
+      editingId: null,
+      textSelection: null,
+    }),
 
-  selectObjects: (ids) => set({ selectedIds: ids }),
+  selectObjects: (ids) => set({ selectedIds: ids, textSelection: null }),
 
   toggleObjectSelection: (id) => {
     const cur = get().selectedIds;
@@ -411,12 +425,31 @@ export const usePdfEditor = create<PdfEditorState>((set, get) => ({
       selectedIds: cur.includes(id)
         ? cur.filter((x) => x !== id)
         : [...cur, id],
+      textSelection: null,
     });
   },
 
-  clearSelection: () => set({ selectedIds: [] }),
+  clearSelection: () => set({ selectedIds: [], textSelection: null }),
 
-  setEditingId: (id) => set({ editingId: id }),
+  setEditingId: (id) => {
+    const state = get();
+    set({
+      editingId: id,
+      textSelection:
+        id && state.editingId === id ? state.textSelection : null,
+    });
+  },
+  setTextSelection: (selection) => {
+    const current = get().textSelection;
+    if (
+      current?.objectId === selection?.objectId &&
+      current?.start === selection?.start &&
+      current?.end === selection?.end
+    ) {
+      return;
+    }
+    set({ textSelection: selection });
+  },
   setLocked: (id, locked) => {
     const obj = get().objects[id];
     if (!obj || obj.locked === locked) return;
@@ -489,7 +522,7 @@ export const usePdfEditor = create<PdfEditorState>((set, get) => ({
       );
     });
 
-    set({ selectedIds: [], editingId: null });
+    set({ selectedIds: [], editingId: null, textSelection: null });
   },
 
   duplicateSelected: () => {

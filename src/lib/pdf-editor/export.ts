@@ -20,6 +20,7 @@
     ShapeObject,
     NewTextObject,
     TextRunObject,
+    StyledTextRun,
     LinkObject,
     NoteObject,
     StampObject,
@@ -33,11 +34,7 @@
     NewImageObject,
     OverlaySettings,
     } from "./types";
-    import {
-    resolveFontForTextRun,
-    resolveFontForRun,
-    hexToRgbTriplet,
-    } from "./fonts";
+    import { resolveFontForRun, hexToRgbTriplet } from "./fonts";
     import { applyPageOps } from "./page-ops";
     import { getOverlayRects, DEFAULT_OVERLAYS } from "./overlay-layout";
 
@@ -272,6 +269,354 @@
 
     /* ───────────── Text ───────────── */
 
+    type ResolvedFontInfo = Awaited<ReturnType<typeof resolveFontForRun>>;
+
+    /**
+     * A single effective text segment after inheriting everything that a
+     * `StyledTextRun` leaves undefined from its containing text object. Used by
+     * the mixed-style renderer so per-character styling decisions only have to
+     * look at one shape.
+     */
+    interface EffectiveTextSegment {
+    text: string;
+    font: ResolvedFontInfo;
+    underline: boolean;
+    strike: boolean;
+    fontSize: number;
+    colorR: number;
+    colorG: number;
+    colorB: number;
+    letterSpacing: number;
+    }
+
+    /**
+     * Build the ordered list of effective segments for a text object.
+     *
+     * - When `obj.runs` is present and non-empty, each styled run becomes its own
+     *   effective segment: any property the run leaves `undefined` inherits from
+     *   the object-level `obj` field, which is the legacy/plain-text formatting
+     *   that used to apply to the whole object.
+     * - When `obj.runs` is absent (legacy object) or empty, a single segment is
+     *   built entirely from the object-level fields — behaviour identical to the
+     *   pre-run export.
+     * - Empty segments (text === "") are skipped, so a split-and-merge cycle that
+     *   leaves a zero-length run doesn't produce ghost draws. Fully-empty text
+     *   yields an empty list, and the caller short-circuits.
+     *
+     * The order of `obj.runs` is preserved exactly — no reordering, no merging.
+     */
+    async function buildEffectiveSegments(
+    doc: PDFDocument,
+    obj: TextRunObject | NewTextObject,
+    ): Promise<EffectiveTextSegment[]> {
+    const source: StyledTextRun[] =
+        obj.runs && obj.runs.length > 0 ? obj.runs : [{ text: obj.text }];
+
+    const result: EffectiveTextSegment[] = [];
+    for (const seg of source) {
+        if (seg.text.length === 0) continue;
+
+        const bold = seg.bold ?? obj.bold;
+        const italic = seg.italic ?? obj.italic;
+        const underline = seg.underline ?? obj.underline;
+        const strike = seg.strike ?? obj.strike ?? false;
+        const fontFamily = seg.fontFamily ?? obj.fontFamily;
+        const fontSize = seg.fontSize ?? obj.fontSize;
+        const colorHex = seg.color ?? obj.color;
+        const letterSpacing = seg.letterSpacing ?? obj.letterSpacing;
+
+        const resolved = await resolveFontForRun(doc, {
+        fontFamily,
+        bold,
+        italic,
+        text: seg.text,
+        });
+        const [cr, cg, cb] = hexToRgbTriplet(colorHex);
+
+        result.push({
+        text: seg.text,
+        font: resolved,
+        underline,
+        strike,
+        fontSize,
+        colorR: cr,
+        colorG: cg,
+        colorB: cb,
+        letterSpacing,
+        });
+    }
+    return result;
+    }
+
+    /**
+     * Render a text object that may mix regular, bold, italic, underline and
+     * strike through segments. Wraps the combined text against `rect.w` at word
+     * boundaries, then draws each visual group with its own font, size, colour,
+     * and decorations. Positions the text inside `rect` following the object's
+     * own `align`, `lineHeight`, and `opacity`.
+     */
+    async function drawMixedText(
+    doc: PDFDocument,
+    page: PDFPage,
+    obj: TextRunObject | NewTextObject,
+    rect: { x: number; y: number; w: number; h: number },
+    ): Promise<void> {
+    const segments = await buildEffectiveSegments(doc, obj);
+    if (segments.length === 0) return;
+
+    // Flatten to per-character run indices so we can walk the combined text in
+    // order and ask "which segment does char i belong to?".
+    const characters: string[] = [];
+    const charRun: number[] = [];
+    for (let ri = 0; ri < segments.length; ri++) {
+        for (const character of segments[ri].text) {
+        characters.push(character);
+        charRun.push(ri);
+        }
+    }
+    if (characters.length === 0) return;
+
+    // Line height and baseline follow the object-level font size (so layout is
+    // stable even if a segment overrides `fontSize`). This matches the previous
+    // single-style behaviour.
+    const lineH = obj.fontSize * (obj.lineHeight || 1.2);
+    const baselineOffset = obj.kind === "text-run" ? 1.0 : 0.85;
+    const baselineY = rect.y + rect.h - obj.fontSize * baselineOffset;
+    const radians = (obj.rotation * Math.PI) / 180;
+    const center = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
+    const transformPoint = (point: { x: number; y: number }) => ({
+        x:
+        center.x +
+        Math.cos(radians) * (point.x - center.x) -
+        Math.sin(radians) * (point.y - center.y),
+        y:
+        center.y +
+        Math.sin(radians) * (point.x - center.x) +
+        Math.cos(radians) * (point.y - center.y),
+    });
+
+    const lines = wrapMixedText(characters, charRun, segments, rect.w);
+
+    for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+        const lineChars = lines[lineIdx];
+        if (lineChars.length === 0) continue;
+        const y = baselineY - lineIdx * lineH;
+
+        // Total line width including per-character letter spacing.
+        let totalW = 0;
+        for (let lineIdx = 0; lineIdx < lineChars.length; lineIdx++) {
+        const ci = lineChars[lineIdx];
+        const seg = segments[charRun[ci]];
+        totalW +=
+            seg.font.widthOfTextAtSize(characters[ci], seg.fontSize) +
+            (lineIdx < lineChars.length - 1 ? seg.letterSpacing : 0);
+        }
+
+        let startX = rect.x;
+        if (obj.align === "center") startX = rect.x + (rect.w - totalW) / 2;
+        else if (obj.align === "right") startX = rect.x + rect.w - totalW;
+
+        let curX = startX;
+        let i = 0;
+        while (i < lineChars.length) {
+        const groupRunIdx = charRun[lineChars[i]];
+        const seg = segments[groupRunIdx];
+
+        // Collect the largest run of chars on this line that share the same
+        // effective segment — that becomes a single drawText call.
+        let groupText = "";
+        let groupCharacterCount = 0;
+        while (i < lineChars.length && charRun[lineChars[i]] === groupRunIdx) {
+            groupText += characters[lineChars[i]];
+            groupCharacterCount++;
+            i++;
+        }
+        if (groupText.length === 0) continue;
+
+        const color = rgb(seg.colorR, seg.colorG, seg.colorB);
+        const textW = seg.font.widthOfTextAtSize(groupText, seg.fontSize);
+        let groupWidth = 0;
+        for (const character of groupText) {
+            groupWidth += seg.font.widthOfTextAtSize(character, seg.fontSize);
+        }
+        const hasFollowingCharacter = i < lineChars.length;
+        const advanceW =
+            groupWidth +
+            seg.letterSpacing *
+            (groupCharacterCount - (hasFollowingCharacter ? 0 : 1));
+        const textPoint = transformPoint({ x: curX, y });
+
+        if (seg.letterSpacing === 0) {
+            page.drawText(groupText, {
+            x: textPoint.x,
+            y: textPoint.y,
+            size: seg.fontSize,
+            font: seg.font.font,
+            color,
+            opacity: obj.opacity,
+            rotate: degrees(obj.rotation),
+            });
+        } else {
+            let glyphX = curX;
+            for (const character of groupText) {
+            const glyphPoint = transformPoint({ x: glyphX, y });
+            page.drawText(character, {
+                x: glyphPoint.x,
+                y: glyphPoint.y,
+                size: seg.fontSize,
+                font: seg.font.font,
+                color,
+                opacity: obj.opacity,
+                rotate: degrees(obj.rotation),
+            });
+            glyphX +=
+                seg.font.widthOfTextAtSize(character, seg.fontSize) +
+                seg.letterSpacing;
+            }
+        }
+
+        if (seg.underline) {
+            const from = transformPoint({
+            x: curX,
+            y: y - seg.fontSize * 0.12,
+            });
+            const to = transformPoint({
+            x:
+                curX +
+                textW +
+                seg.letterSpacing * Math.max(0, groupCharacterCount - 1),
+            y: y - seg.fontSize * 0.12,
+            });
+            page.drawLine({
+            start: from,
+            end: to,
+            thickness: Math.max(0.5, seg.fontSize * 0.06),
+            color,
+            opacity: obj.opacity,
+            });
+        }
+        if (seg.strike) {
+            const from = transformPoint({
+            x: curX,
+            y: y + seg.fontSize * 0.3,
+            });
+            const to = transformPoint({
+            x:
+                curX +
+                textW +
+                seg.letterSpacing * Math.max(0, groupCharacterCount - 1),
+            y: y + seg.fontSize * 0.3,
+            });
+            page.drawLine({
+            start: from,
+            end: to,
+            thickness: Math.max(0.5, seg.fontSize * 0.06),
+            color,
+            opacity: obj.opacity,
+            });
+        }
+
+        curX += advanceW;
+        }
+    }
+    }
+
+    /**
+     * Word-wrap mixed-style text. Returns a list of lines, each line being the
+     * ordered list of character indices that appear on that line. Whitespace at
+     * the start of a wrapped line is skipped, and long words are never split
+     * mid-glyph — they simply occupy their own line if they don't fit.
+     */
+    function wrapMixedText(
+    text: string[],
+    charRun: number[],
+    segments: EffectiveTextSegment[],
+    maxWidth: number,
+    ): number[][] {
+    if (text.length === 0) return [[]];
+
+    const advanceAt = (idx: number): number => {
+        const seg = segments[charRun[idx]];
+        return (
+        seg.font.widthOfTextAtSize(text[idx], seg.fontSize) + seg.letterSpacing
+        );
+    };
+
+    // Tokenise into alternating word / whitespace blocks.
+    interface Token {
+        indices: number[];
+        isWhitespace: boolean;
+        lineBreak?: boolean;
+    }
+    const tokens: Token[] = [];
+    let bucket: number[] = [];
+    let bucketIsWs = false;
+    for (let i = 0; i < text.length; i++) {
+        if (text[i] === "\n" || text[i] === "\r") {
+        if (bucket.length > 0) {
+            tokens.push({ indices: bucket, isWhitespace: bucketIsWs });
+            bucket = [];
+        }
+        if (text[i] === "\r" && text[i + 1] === "\n") i++;
+        tokens.push({ indices: [], isWhitespace: true, lineBreak: true });
+        continue;
+        }
+        const ws = /\s/.test(text[i]);
+        if (bucket.length === 0) {
+        bucketIsWs = ws;
+        bucket.push(i);
+        } else if (ws === bucketIsWs) {
+        bucket.push(i);
+        } else {
+        tokens.push({ indices: bucket, isWhitespace: bucketIsWs });
+        bucket = [i];
+        bucketIsWs = ws;
+        }
+    }
+    if (bucket.length > 0) {
+        tokens.push({ indices: bucket, isWhitespace: bucketIsWs });
+    }
+
+    const lines: number[][] = [];
+    let current: number[] = [];
+    let currentW = 0;
+
+    for (const tok of tokens) {
+        if (tok.lineBreak) {
+        lines.push(current);
+        current = [];
+        currentW = 0;
+        continue;
+        }
+        let tokW = 0;
+        for (const idx of tok.indices) tokW += advanceAt(idx);
+
+        // Wrap before a non-whitespace token that no longer fits on a line that
+        // already has content. Whitespace always attaches to the current line
+        // rather than forcing a fresh one.
+        if (current.length > 0 && currentW + tokW > maxWidth && !tok.isWhitespace) {
+        lines.push(current);
+        current = [];
+        currentW = 0;
+        }
+
+        // Drop leading whitespace on a freshly wrapped line.
+        if (tok.isWhitespace && current.length === 0) continue;
+
+        for (const idx of tok.indices) current.push(idx);
+        currentW += tokW;
+    }
+    if (
+        current.length > 0 ||
+        lines.length === 0 ||
+        tokens[tokens.length - 1]?.lineBreak
+    ) {
+        lines.push(current);
+    }
+
+    return lines.length > 0 ? lines : [[]];
+    }
+
     async function drawTextRun(
     doc: PDFDocument,
     page: PDFPage,
@@ -280,59 +625,7 @@
     ): Promise<void> {
     if (!run.dirty || run.deleted) return;
     const rect = clampRect(run.rect, pageInfo);
-    const resolved = await resolveFontForTextRun(doc, run);
-    const [tr, tg, tb] = hexToRgbTriplet(run.color);
-    const color = rgb(tr, tg, tb);
-    const lines = wrapLines(
-        run.text,
-        run.fontSize,
-        run.letterSpacing,
-        rect.w,
-        resolved.widthOfTextAtSize,
-    );
-    const lineH = run.fontSize * (run.lineHeight || 1.2);
-    const baselineY = rect.y + rect.h - run.fontSize * 1.0;
-
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const y = baselineY - i * lineH;
-            let x = rect.x;
-            const textWidth = resolved.widthOfTextAtSize(line, run.fontSize);
-
-            if (run.align === "center") {
-            x = rect.x + (rect.w - textWidth) / 2;
-            } else if (run.align === "right") {
-            x = rect.x + rect.w - textWidth;
-            }
-
-            page.drawText(line, {
-            x,
-            y,
-            size: run.fontSize,
-            font: resolved.font,
-            color,
-            opacity: run.opacity,
-            });
-
-        if (run.underline) {
-        const w = resolved.widthOfTextAtSize(line, run.fontSize);
-        page.drawLine({
-            start: { x: rect.x, y: y - run.fontSize * 0.12 },
-            end: { x: rect.x + w, y: y - run.fontSize * 0.12 },
-            thickness: Math.max(0.5, run.fontSize * 0.06),
-            color,
-        });
-        }
-        if (run.strike) {
-        const w = resolved.widthOfTextAtSize(line, run.fontSize);
-        page.drawLine({
-            start: { x: rect.x, y: y + run.fontSize * 0.3 },
-            end: { x: rect.x + w, y: y + run.fontSize * 0.3 },
-            thickness: Math.max(0.5, run.fontSize * 0.06),
-            color,
-        });
-        }
-    }
+    await drawMixedText(doc, page, run, rect);
     }
 
     async function drawNewText(
@@ -341,88 +634,7 @@
     obj: NewTextObject,
     ): Promise<void> {
     const rect = obj.rect;
-    const resolved = await resolveFontForRun(doc, {
-        fontFamily: obj.fontFamily,
-        bold: obj.bold,
-        italic: obj.italic,
-        text: obj.text,
-    });
-    const [r, g, b] = hexToRgbTriplet(obj.color);
-    const color = rgb(r, g, b);
-    const lines = wrapLines(
-        obj.text,
-        obj.fontSize,
-        obj.letterSpacing,
-        rect.w,
-        resolved.widthOfTextAtSize,
-    );
-    const lineH = obj.fontSize * (obj.lineHeight || 1.2);
-    const baselineY = rect.y + rect.h - obj.fontSize * 0.85;
-
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        let x = rect.x;
-        if (obj.align === "center") {
-        x =
-            rect.x + (rect.w - resolved.widthOfTextAtSize(line, obj.fontSize)) / 2;
-        } else if (obj.align === "right") {
-        x = rect.x + rect.w - resolved.widthOfTextAtSize(line, obj.fontSize);
-        }
-        const y = baselineY - i * lineH;
-        page.drawText(line, {
-        x,
-        y,
-        size: obj.fontSize,
-        font: resolved.font,
-        color,
-        opacity: obj.opacity,
-        });
-        if (obj.underline) {
-        const w = resolved.widthOfTextAtSize(line, obj.fontSize);
-        page.drawLine({
-            start: { x, y: y - obj.fontSize * 0.12 },
-            end: { x: x + w, y: y - obj.fontSize * 0.12 },
-            thickness: Math.max(0.5, obj.fontSize * 0.06),
-            color,
-        });
-        }
-        if (obj.strike) {
-        const w = resolved.widthOfTextAtSize(line, obj.fontSize);
-        page.drawLine({
-            start: { x, y: y + obj.fontSize * 0.3 },
-            end: { x: x + w, y: y + obj.fontSize * 0.3 },
-            thickness: Math.max(0.5, obj.fontSize * 0.06),
-            color,
-        });
-        }
-    }
-    }
-
-    function wrapLines(
-    text: string,
-    fontSize: number,
-    letterSpacing: number,
-    maxWidth: number,
-    measure: (s: string, size: number) => number,
-    ): string[] {
-    if (!text) return [""];
-    const words = text.split(/(\s+)/);
-    const lines: string[] = [];
-    let current = "";
-    const measureWithSpacing = (s: string) =>
-        measure(s, fontSize) + letterSpacing * Math.max(0, s.length - 1);
-
-    for (const w of words) {
-        const candidate = current + w;
-        if (measureWithSpacing(candidate) <= maxWidth || current === "") {
-        current = candidate;
-        } else {
-        lines.push(current.trimEnd());
-        current = w.trimStart();
-        }
-    }
-    if (current) lines.push(current.trimEnd());
-    return lines.length ? lines : [""];
+    await drawMixedText(doc, page, obj, rect);
     }
 
     function clampRect(

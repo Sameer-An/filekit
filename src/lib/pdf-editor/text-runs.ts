@@ -1,11 +1,24 @@
 // src/lib/pdf-editor/text-runs.ts
 // Extract text runs from a pdfjs page. Each run becomes a TextRunObject that
-// the editor can anchor an overlay textarea to. Untouched runs are marked
+// the editor can anchor a rich-text overlay to. Untouched runs are marked
 // `dirty: false` and are excluded from export — only dirty runs get the
 // cover + redraw treatment.
+//
+// Compatibility model (see types.ts): when a text object has `runs`, they are
+// the source of truth for content and character-level formatting. Objects
+// without `runs` fall back to the object-level `text` and style fields. The
+// helpers below always materialise runs from legacy objects before editing,
+// so the fallback is preserved without change.
 
 import type { PDFPageProxy } from "pdfjs-dist";
-import type { FontFamilyId, PageInfo, RectPt, TextRunObject } from "./types";
+import type {
+  FontFamilyId,
+  PageInfo,
+  RectPt,
+  TextRunObject,
+  NewTextObject,
+  StyledTextRun,
+} from "./types";
 import { normalizeHexColor, pageUid, pdfjsTextItemToPdfRect } from "./coords";
 import {
   extractColoursByOperatorList,
@@ -61,7 +74,6 @@ interface PdfjsFontDescriptor {
   };
 }
 
-
 function getFontDescriptor(
   page: PDFPageProxy,
   fontName: string | undefined,
@@ -90,7 +102,6 @@ function getFontDescriptor(
     return null;
   }
 }
-
 
 interface ExtractOptions {
   sampleBackground?: (rect: RectPt) => string;
@@ -242,7 +253,6 @@ export async function extractTextRuns(
         : undefined,
     );
 
-    
     // ── Font size from the linear part of the transform matrix ───────────────
     const a = item.transform[0] ?? 1;
     const b = item.transform[1] ?? 0;
@@ -355,4 +365,377 @@ export function reconcileTextRuns(
   }
 
   return merged;
+}
+
+// ─── Styled-run helpers ─────────────────────────────────────────────────────
+//
+// These operate on the `runs` array introduced in types.ts. They never touch
+// the store or React; callers pass in a text object and apply the returned
+// value via their existing update path. The helpers are safe on legacy
+// objects that do not yet have `runs` — they materialise one run from the
+// object-level properties first, so existing formatting is not lost.
+//
+// The helpers do NOT mutate their inputs. `mergeAdjacentRuns` copies each run
+// before merging text; `applyStyleToRange` returns a fresh object and leaves
+// the original untouched.
+
+/** Either a TextRunObject or a NewTextObject — the two text-like objects in types.ts. */
+export type TextLikeObject = TextRunObject | NewTextObject;
+
+/** Style-only patch for a run — everything except the `text` content. */
+export type StyledRunPatch = Omit<StyledTextRun, "text">;
+
+/**
+ * Return the effective styled runs for a text object.
+ *
+ * - If `obj.runs` is present and non-empty, they are returned verbatim (each
+ *   run copied so the caller can mutate safely). Unset properties on a run
+ *   still inherit from `obj` at render time via the standard compatibility
+ *   model.
+ * - Otherwise a single run is materialised from the object-level text and
+ *   style properties. This is the fallback that keeps legacy objects working
+ *   after their first character-level edit.
+ */
+export function materializeRuns(obj: TextLikeObject): StyledTextRun[] {
+  if (obj.runs && obj.runs.length > 0) {
+    return obj.runs.map((run) => ({ ...run }));
+  }
+  return [
+    {
+      text: obj.text,
+      bold: obj.bold,
+      italic: obj.italic,
+      underline: obj.underline,
+      strike: obj.strike ?? false,
+      fontFamily: obj.fontFamily,
+      fontSize: obj.fontSize,
+      color: obj.color,
+      letterSpacing: obj.letterSpacing,
+    },
+  ];
+}
+
+/**
+ * Split a run array at a character offset.
+ *
+ * - offset === 0 returns `{ left: [], right: [...runs] }`
+ * - offset >= total length returns `{ left: [...runs], right: [] }`
+ * - an offset strictly inside a run splits it into two runs that share every
+ *   other property — text content, order, and all style attributes are
+ *   preserved exactly.
+ *
+ * The returned arrays are freshly allocated. When a run is split, both halves
+ * are new objects; runs outside the split point are shallow-copied so callers
+ * cannot mutate the input.
+ */
+export function splitRunAt(
+  runs: StyledTextRun[],
+  offset: number,
+): { left: StyledTextRun[]; right: StyledTextRun[] } {
+  if (runs.length === 0) return { left: [], right: [] };
+
+  const total = runs.reduce((sum, r) => sum + r.text.length, 0);
+  const target = Math.max(0, Math.min(offset, total));
+
+  if (target === 0) {
+    return { left: [], right: runs.map((r) => ({ ...r })) };
+  }
+  if (target === total) {
+    return { left: runs.map((r) => ({ ...r })), right: [] };
+  }
+
+  let pos = 0;
+  for (let i = 0; i < runs.length; i++) {
+    const run = runs[i];
+    const runEnd = pos + run.text.length;
+
+    if (target === pos) {
+      return {
+        left: runs.slice(0, i).map((r) => ({ ...r })),
+        right: runs.slice(i).map((r) => ({ ...r })),
+      };
+    }
+    if (target > pos && target < runEnd) {
+      const local = target - pos;
+      const leftRun: StyledTextRun = {
+        ...run,
+        text: run.text.slice(0, local),
+      };
+      const rightRun: StyledTextRun = {
+        ...run,
+        text: run.text.slice(local),
+      };
+      return {
+        left: [...runs.slice(0, i).map((r) => ({ ...r })), leftRun],
+        right: [rightRun, ...runs.slice(i + 1).map((r) => ({ ...r }))],
+      };
+    }
+    if (target === runEnd) {
+      return {
+        left: runs.slice(0, i + 1).map((r) => ({ ...r })),
+        right: runs.slice(i + 1).map((r) => ({ ...r })),
+      };
+    }
+
+    pos = runEnd;
+  }
+
+  // Unreachable given target <= total, but keep the compiler happy and be
+  // defensive against a caller passing a malformed offset.
+  return { left: runs.map((r) => ({ ...r })), right: [] };
+}
+
+/**
+ * True when two runs resolve to identical styling. Because `materializeRuns`
+ * expands object-level defaults into each run before editing, comparing the
+ * fields directly is enough. Two runs that both leave `bold`/`italic`/etc.
+ * undefined are treated as equal (they inherit from the same containing
+ * object). An `undefined` vs an explicit value is treated as different — this
+ * is conservative and avoids collapsing runs whose effective style can only
+ * be determined with the containing object in hand.
+ */
+function sameRunStyle(a: StyledTextRun, b: StyledTextRun): boolean {
+  return (
+    a.bold === b.bold &&
+    a.italic === b.italic &&
+    a.underline === b.underline &&
+    a.strike === b.strike &&
+    a.fontFamily === b.fontFamily &&
+    a.fontSize === b.fontSize &&
+    a.color === b.color &&
+    a.letterSpacing === b.letterSpacing
+  );
+}
+
+/**
+ * Merge adjacent runs whose styling is identical. Run order is preserved and
+ * text is concatenated left-to-right. Runs with different styling are never
+ * combined, so this is safe to call after an edit that split a run at the
+ * boundaries of a style patch — adjacent untouched runs collapse back into
+ * one, and the styled run stays distinct.
+ */
+export function mergeAdjacentRuns(runs: StyledTextRun[]): StyledTextRun[] {
+  if (runs.length <= 1) return runs.map((r) => ({ ...r }));
+
+  const out: StyledTextRun[] = [{ ...runs[0] }];
+  for (let i = 1; i < runs.length; i++) {
+    const last = out[out.length - 1];
+    const current = runs[i];
+    if (sameRunStyle(last, current)) {
+      out[out.length - 1] = { ...last, text: last.text + current.text };
+    } else {
+      out.push({ ...current });
+    }
+  }
+  return out;
+}
+
+/**
+ * Return a new text object whose `runs` are the supplied array and whose
+ * `text` mirrors their concatenation. This is the single place the compatibility
+ * invariant "obj.text === runs.map(r => r.text).join('')" is enforced.
+ *
+ * Does not change `dirty` or `origRect` — those remain the caller's
+ * responsibility so this helper stays free of any store-specific behavior.
+ */
+export function withRuns(
+  obj: TextLikeObject,
+  runs: StyledTextRun[],
+): TextLikeObject {
+  const text = runs.map((r) => r.text).join("");
+  return { ...obj, text, runs };
+}
+
+/**
+ * Clear the character-level `runs` on a text object, falling back to the
+ * object-level `text` and style fields. Useful when a caller has edited the
+ * plain text without preserving character positions — the alternative would
+ * be a `runs` array that no longer matches `text`.
+ *
+ * No-op for objects that never had `runs`.
+ */
+export function clearRuns(obj: TextLikeObject): TextLikeObject {
+  if (!obj.runs) return obj;
+  return { ...obj, runs: undefined };
+}
+
+/**
+ * Apply a style patch to the character range `[start, end)` of a text object,
+ * preserving every character outside the range and every style attribute the
+ * patch does not mention.
+ *
+ * Behavior:
+ * - `start` and `end` are clamped to `[0, text.length]`.
+ * - An empty range (`start >= end`) returns `obj` unchanged.
+ * - Legacy objects (no `runs`) are first materialised into a single run, so
+ *   their object-level formatting survives the edit.
+ * - The patch is applied only to the runs that overlap `[start, end)`.
+ * - Touched runs are split at the exact boundaries, so character order and
+ *   total text are preserved byte-for-byte.
+ * - Adjacent runs with identical styling are re-merged so the result is
+ *   canonical.
+ * - For `text-run` objects the returned object has `dirty: true` so the
+ *   export path knows it must redraw. For `new-text` objects `dirty` is not
+ *   part of the type and is left untouched.
+ *
+ * Callers are responsible for committing the returned object via their
+ * existing update path (e.g. `commit(...)` or `updateObject(...)`); this
+ * helper does not talk to the store.
+ */
+export function applyStyleToRange(
+  obj: TextLikeObject,
+  start: number,
+  end: number,
+  patch: StyledRunPatch,
+): TextLikeObject {
+  const runs = materializeRuns(obj);
+  const total = runs.reduce((sum, r) => sum + r.text.length, 0);
+  const s = Math.max(0, Math.min(start, total));
+  const e = Math.max(s, Math.min(end, total));
+  if (s === e) return obj;
+
+  const firstSplit = splitRunAt(runs, s);
+  const secondSplit = splitRunAt(firstSplit.right, e - s);
+
+  const styledRuns: StyledTextRun[] = secondSplit.left.map((run) => ({
+    ...run,
+    ...patch,
+  }));
+
+  const merged = mergeAdjacentRuns([
+    ...firstSplit.left,
+    ...styledRuns,
+    ...secondSplit.right,
+  ]);
+
+  const next = withRuns(obj, merged);
+  if (next.kind === "text-run") {
+    return { ...next, dirty: true };
+  }
+  return next;
+}
+
+export type TextStyleKey = "bold" | "italic" | "underline" | "strike";
+export type TextStyleState = boolean | "Mixed";
+
+/**
+ * Read the effective style across a non-empty character range.
+ * Returns null for a collapsed or out-of-range selection.
+ */
+export function styleForRange(
+  obj: TextLikeObject,
+  key: TextStyleKey,
+  start: number,
+  end: number,
+): TextStyleState | null {
+  const runs = materializeRuns(obj);
+  const total = runs.reduce((sum, run) => sum + run.text.length, 0);
+  const from = Math.max(0, Math.min(start, end, total));
+  const to = Math.max(from, Math.min(Math.max(start, end), total));
+  if (from === to) return null;
+
+  let position = 0;
+  let first: boolean | undefined;
+  for (const run of runs) {
+    const runEnd = position + run.text.length;
+    if (runEnd > from && position < to) {
+      const value = run[key] ?? obj[key] ?? false;
+      if (first === undefined) first = value;
+      else if (first !== value) return "Mixed";
+    }
+    position = runEnd;
+  }
+  return first ?? false;
+}
+
+/**
+ * Replace the object's text while preserving formatting outside the changed
+ * span. Newly inserted text inherits the style immediately before its
+ * insertion point, or the first affected/available style at the start.
+ */
+export function replaceText(
+  obj: TextLikeObject,
+  nextText: string,
+): TextLikeObject {
+  const runs = materializeRuns(obj);
+  const previousText = runs.map((run) => run.text).join("");
+  if (previousText === nextText && obj.text === nextText) return obj;
+
+  let prefix = 0;
+  while (
+    prefix < previousText.length &&
+    prefix < nextText.length &&
+    previousText[prefix] === nextText[prefix]
+  ) {
+    prefix++;
+  }
+
+  let suffix = 0;
+  while (
+    suffix < previousText.length - prefix &&
+    suffix < nextText.length - prefix &&
+    previousText[previousText.length - suffix - 1] ===
+      nextText[nextText.length - suffix - 1]
+  ) {
+    suffix++;
+  }
+
+  return replaceTextRange(
+    obj,
+    prefix,
+    previousText.length - suffix,
+    nextText.slice(prefix, nextText.length - suffix),
+  );
+}
+
+/** Replace a specific character range while retaining the surrounding runs. */
+export function replaceTextRange<T extends TextLikeObject>(
+  obj: T,
+  start: number,
+  end: number,
+  insertedText: string,
+): T {
+  const runs = materializeRuns(obj);
+  const previousText = runs.map((run) => run.text).join("");
+  const rangeStart = Math.max(0, Math.min(start, end, previousText.length));
+  const rangeEnd = Math.max(
+    rangeStart,
+    Math.min(Math.max(start, end), previousText.length),
+  );
+  if (
+    rangeStart === rangeEnd &&
+    insertedText.length === 0 &&
+    obj.text === previousText
+  ) {
+    return obj;
+  }
+
+  const left = splitRunAt(runs, rangeStart).left;
+  const right = splitRunAt(runs, rangeEnd).right;
+
+  let insertedRuns: StyledTextRun[] = [];
+  if (insertedText.length > 0) {
+    const stylePosition =
+      rangeEnd > rangeStart
+        ? rangeStart
+        : rangeStart > 0
+          ? rangeStart - 1
+          : rangeStart;
+    let position = 0;
+    let styleSource = runs[runs.length - 1];
+    for (const run of runs) {
+      if (stylePosition < position + run.text.length) {
+        styleSource = run;
+        break;
+      }
+      position += run.text.length;
+    }
+
+    insertedRuns = [{ ...styleSource, text: insertedText }];
+  }
+
+  const nextRuns = mergeAdjacentRuns(
+    [...left, ...insertedRuns, ...right].filter((run) => run.text.length > 0),
+  );
+  return withRuns(obj, nextRuns) as T;
 }

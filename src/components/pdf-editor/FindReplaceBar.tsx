@@ -7,6 +7,7 @@
 import React, { useMemo, useState } from "react";
 import { Search, X } from "lucide-react";
 import { usePdfEditor } from "@/lib/pdf-editor/store";
+import { replaceTextRange } from "@/lib/pdf-editor/text-runs";
 
 export function FindReplaceBar() {
 const open = usePdfEditor((s) => s.findOpen);
@@ -33,14 +34,23 @@ const applyReplace = () => {
     for (const o of Object.values(d.objects)) {
         if (o.kind !== "text-run") continue;
         if (o.text.toLowerCase().includes(needle.toLowerCase())) {
-        d.objects[o.id] = {
-            ...o,
-            text: o.text.replace(
-            new RegExp(escapeRegExp(needle), "gi"),
-            replacement,
-            ),
-            dirty: true,
-        };
+        const regex = new RegExp(escapeRegExp(needle), "gi");
+        const matches = Array.from(o.text.matchAll(regex), (match) => ({
+            index: match.index,
+            text: match[0],
+        }));
+        let next = o;
+        for (const match of matches.reverse()) {
+            if (match.index === undefined) continue;
+            const inserted = match.text.replace(regex, replacement);
+            next = replaceTextRange(
+                next,
+                match.index,
+                match.index + match.text.length,
+                inserted,
+            );
+        }
+        d.objects[o.id] = { ...next, dirty: true };
         }
     }
     });
