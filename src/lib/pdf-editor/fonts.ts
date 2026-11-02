@@ -20,6 +20,12 @@ export interface ResolvedFont {
   face: string;
 }
 
+export interface UploadedPdfFont {
+  bytes: Uint8Array;
+  bold: boolean;
+  italic: boolean;
+}
+
 export function hexToRgbTriplet(hex: string): [number, number, number] {
   const clean = hex.replace("#", "");
   const n = parseInt(clean, 16);
@@ -121,7 +127,7 @@ async function loadFontBuffer(fileName: string, ext: string): Promise<ArrayBuffe
   }
 }
 
-const SUPPORTED_EXTENSIONS = [".woff2", ".woff", ".ttf"] as const;
+const SUPPORTED_EXTENSIONS = [".ttf", ".otf"] as const;
 
 /** Resolves a custom font file and embeds it into the PDF with caching. */
 async function embedCustomFont(doc: PDFDocument, fileName: string): Promise<PDFFont> {
@@ -140,11 +146,7 @@ async function embedCustomFont(doc: PDFDocument, fileName: string): Promise<PDFF
     if (!bytes) continue;
 
     try {
-      // Fontkit doesn't support subsetting WOFF2 (throws RangeError during doc.save).
-      // For WOFF2, embed without subsetting; for TTF/OTF, embed with subsetting.
-      const font = ext === ".woff2"
-        ? await doc.embedFont(bytes)
-        : await doc.embedFont(bytes, { subset: true });
+      const font = await doc.embedFont(bytes, { subset: true });
 
       setCachedFont(doc, cacheKey, font);
       return font;
@@ -172,34 +174,82 @@ export async function resolveFontForRun(
     bold: boolean;
     italic: boolean;
     text: string;
+    uploadedFont?: UploadedPdfFont;
   },
 ): Promise<ResolvedFont> {
-  const { text, bold, italic, fontFamily } = input;
+  const { text, bold, italic, fontFamily, uploadedFont } = input;
+
+  if (uploadedFont) {
+    const parsed = fontkit.create(uploadedFont.bytes);
+    const missingGlyphs = missingFontGlyphs(parsed, text);
+    if (missingGlyphs.length > 0) {
+      throw new Error(
+        `Imported font "${fontFamily}" does not contain glyphs for ${missingGlyphs.slice(0, 4).join(", ")}.`,
+      );
+    }
+    const cacheKey = `uploaded:${fontFamily}`;
+    let font = getCachedFont(doc, cacheKey);
+    if (!font) {
+      try {
+        doc.registerFontkit(fontkit);
+      } catch {
+        // Fontkit is already registered on this document.
+      }
+      try {
+        font = await doc.embedFont(uploadedFont.bytes, { subset: true });
+      } catch (error) {
+        throw new Error(
+          `Could not embed imported font "${fontFamily}" in the PDF.`,
+          { cause: error },
+        );
+      }
+      setCachedFont(doc, cacheKey, font);
+    }
+
+    const styleMatches = bold === uploadedFont.bold && italic === uploadedFont.italic;
+    return {
+      font,
+      widthOfTextAtSize: (value, size) => font.widthOfTextAtSize(value, size),
+      substituted: !styleMatches,
+      face: styleMatches
+        ? fontFamily
+        : `${fontFamily} (imported face does not match requested style)`,
+    };
+  }
 
   try {
     // If text needs Noto for extended Unicode coverage (non-Latin) or fontFamily is Noto Sans
     if (needsNoto(text) || fontFamily === "Noto Sans") {
       const variant = bold ? "NotoSans-Bold" : "NotoSans-Regular";
       try {
+        const bytes = await loadFontBuffer(variant, ".ttf");
+        if (!bytes) throw new Error("Bundled Noto Sans TTF asset is missing.");
+        const parsed = fontkit.create(new Uint8Array(bytes));
+        const missingGlyphs = missingFontGlyphs(parsed, text);
+        if (missingGlyphs.length > 0) {
+          throw new Error(
+            `Bundled Noto Sans does not contain glyphs for ${missingGlyphs.slice(0, 4).join(", ")}.`,
+          );
+        }
         const font = await embedCustomFont(doc, variant);
         return {
           font,
           widthOfTextAtSize: (value, size) => font.widthOfTextAtSize(value, size),
-          substituted: fontFamily !== "Noto Sans",
-          face: "Noto Sans",
+          substituted: fontFamily !== "Noto Sans" || italic,
+          face: italic
+            ? "Noto Sans (italic variant unavailable; regular face embedded)"
+            : "Noto Sans",
         };
-      } catch {
-        // Fall back to Helvetica if Noto loading fails
-        const font = await getOrEmbedStandardFont(
-          doc,
-          standardFontFor("Helvetica", bold, italic),
-        );
-        return {
-          font,
-          widthOfTextAtSize: (value, size) => font.widthOfTextAtSize(value, size),
-          substituted: true,
-          face: "Helvetica (fallback)",
-        };
+      } catch (error) {
+        if (needsNoto(text)) {
+          throw new Error(
+            error instanceof Error
+              ? `${error.message} PDF export requires an uploaded font with the necessary glyphs.`
+              : "Bundled Noto Sans is unavailable. PDF export requires an uploaded font with the necessary glyphs.",
+            { cause: error },
+          );
+        }
+        throw error;
       }
     }
 
@@ -234,11 +284,7 @@ export async function resolveFontForRun(
     const standardFont = standardFontFor(fontFamily, bold, italic);
     const font = await getOrEmbedStandardFont(doc, standardFont);
 
-    const usesFallback =
-      !fontFamily.toLowerCase().includes("helvetica") &&
-      !fontFamily.toLowerCase().includes("arial") &&
-      !fontFamily.toLowerCase().includes("times") &&
-      !fontFamily.toLowerCase().includes("courier");
+    const usesFallback = fontFamily.toLowerCase() !== "helvetica";
 
     return {
       font,
@@ -246,8 +292,12 @@ export async function resolveFontForRun(
       substituted: usesFallback,
       face: usesFallback ? `${fontFamily} (standard fallback)` : fontFamily,
     };
-  } catch {
-    // Never throw from font resolution during export - fallback to Helvetica
+  } catch (error) {
+    if (needsNoto(text) || fontFamily === "Noto Sans") {
+      throw error instanceof Error
+        ? error
+        : new Error(`Could not resolve a font for "${fontFamily}".`);
+    }
     const font = await getOrEmbedStandardFont(doc, StandardFonts.Helvetica);
     return {
       font,
@@ -256,6 +306,21 @@ export async function resolveFontForRun(
       face: "Helvetica (fallback)",
     };
   }
+}
+
+function missingFontGlyphs(font: fontkit.Font, text: string): string[] {
+  const missing = new Set<string>();
+  for (const character of text) {
+    const codePoint = character.codePointAt(0);
+    if (
+      codePoint !== undefined &&
+      !/\s/u.test(character) &&
+      !font.hasGlyphForCodePoint(codePoint)
+    ) {
+      missing.add(`U+${codePoint.toString(16).toUpperCase()}`);
+    }
+  }
+  return Array.from(missing);
 }
 
 export async function resolveFontForTextRun(

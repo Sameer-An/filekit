@@ -19,6 +19,7 @@ import type {
   NewTextObject,
   StyledTextRun,
   HighlightObject,
+  DrawObject,
 } from "@/lib/pdf-editor/types";
 import {
   pdfRectToCss,
@@ -30,6 +31,8 @@ import {
   materializeRuns,
   replaceText,
 } from "@/lib/pdf-editor/text-runs";
+import { getFontCssStack } from "@/lib/pdf-editor/font-catalogue";
+import { ensureFontLoaded } from "@/lib/pdf-editor/uploaded-fonts";
 
 interface ObjectLayerProps {
   pageIndex: number;
@@ -90,6 +93,7 @@ export function ObjectLayer({
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [rootSize, setRootSize] = useState({ width: 1, height: 1 });
   const selectedSet = new Set(selectedIds);
 
   /** Local drag state: only set after threshold is exceeded */
@@ -145,6 +149,25 @@ export function ObjectLayer({
     w: number;
     h: number;
   } | null>(null);
+  const drawRef = useRef<{
+    pointerId: number;
+    points: Array<{ x: number; y: number; pressure: number }>;
+  } | null>(null);
+  const [drawPreview, setDrawPreview] = useState<
+    Array<{ x: number; y: number; pressure: number }>
+  >([]);
+
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const updateSize = () => {
+      setRootSize({ width: root.clientWidth, height: root.clientHeight });
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, []);
 
   // Image upload
   useEffect(() => {
@@ -266,7 +289,12 @@ export function ObjectLayer({
           obj = { ...base, kind: "stamp", label: "DRAFT", color: "#dc2626" };
           break;
         case "checkmark":
-          obj = { ...base, kind: "checkmark", color: "#16a34a" };
+          obj = {
+            ...base,
+            rect: clampRect({ ...base.rect, w: 40, h: 40 }, pageInfo),
+            kind: "checkmark",
+            color: "#16a34a",
+          };
           break;
         default:
           return;
@@ -279,10 +307,28 @@ export function ObjectLayer({
     [activeTool, pageIndex, pageInfo, objects.length, addObject],
   );
 
+  const beginDrawing = useCallback((e: React.PointerEvent) => {
+    const root = rootRef.current;
+    if (!root || activeTool !== "draw") return;
+    e.preventDefault();
+    const point = toLocal(root, e, zoom);
+    drawRef.current = {
+      pointerId: e.pointerId,
+      points: [{ ...point, pressure: e.pressure || 0.5 }],
+    };
+    setDrawPreview(drawRef.current.points);
+    root.setPointerCapture(e.pointerId);
+  }, [activeTool, zoom]);
+
   /** Background pointer down: select / create / highlight drag */
   const onBackgroundPointerDown = useCallback(
     (e: React.PointerEvent) => {
       if (e.target !== e.currentTarget) return;
+
+      if (activeTool === "draw") {
+        beginDrawing(e);
+        return;
+      }
 
       if (activeTool === "highlight") {
         const root = rootRef.current;
@@ -335,7 +381,7 @@ export function ObjectLayer({
       createNewObjectAt(pt);
       return;
     },
-    [activeTool, pageInfo, zoom, selectObjects, createNewObjectAt],
+    [activeTool, pageInfo, zoom, selectObjects, createNewObjectAt, beginDrawing],
   );
 
   /** Object pointer down: register drag candidate (no capture yet) */
@@ -347,6 +393,11 @@ export function ObjectLayer({
   ) => {
     if (obj.deleted) return;
     e.stopPropagation();
+
+    if (activeTool === "draw") {
+      beginDrawing(e);
+      return;
+    }
 
     const isMultiKey = e.shiftKey || e.ctrlKey || e.metaKey;
     if (isMultiKey) {
@@ -384,6 +435,19 @@ export function ObjectLayer({
 
   /** Global pointer move: start drag only after threshold */
   const onPointerMove = (e: React.PointerEvent) => {
+    if (drawRef.current?.pointerId === e.pointerId) {
+      const root = rootRef.current;
+      if (!root) return;
+      const point = toLocal(root, e, zoom);
+      const points = [
+        ...drawRef.current.points,
+        { ...point, pressure: e.pressure || 0.5 },
+      ];
+      drawRef.current.points = points;
+      setDrawPreview(points);
+      return;
+    }
+
     // Marquee selection drag
     if (marqueeDragRef.current?.active) {
       const drag = marqueeDragRef.current;
@@ -494,6 +558,39 @@ export function ObjectLayer({
         next.w = snapPt(next.w, 4);
         next.h = snapPt(next.h, 4);
       }
+      const resizedObject = objects.find((obj) => obj.id === pending.id);
+      if (resizedObject?.kind === "checkmark") {
+        const start = pending.startRect;
+        const horizontal = h.includes("e") || h.includes("w");
+        const vertical = h.includes("n") || h.includes("s");
+        let size =
+          horizontal && vertical
+            ? Math.max(next.w, next.h)
+            : horizontal
+              ? next.w
+              : next.h;
+        if (gridSnap && !e.altKey) size = snapPt(size, 4);
+        size = Math.max(4, Math.min(
+          size,
+          pageInfo.widthPt,
+          pageInfo.heightPt,
+        ));
+        const isWest = h.includes("w");
+        const isNorth = h.includes("n");
+        const x =
+          horizontal
+            ? isWest
+              ? start.x + start.w - size
+              : start.x
+            : start.x + (start.w - size) / 2;
+        const y =
+          vertical
+            ? isNorth
+              ? start.y + start.h - size
+              : start.y
+            : start.y + (start.h - size) / 2;
+        next = { x, y, w: size, h: size };
+      }
     }
 
     next = clampRect(next, pageInfo);
@@ -502,6 +599,54 @@ export function ObjectLayer({
 
   /** Pointer up: commit drag / finish highlight */
   const onPointerUp = (e: React.PointerEvent) => {
+    if (drawRef.current?.pointerId === e.pointerId) {
+      const root = rootRef.current;
+      const points = drawRef.current.points;
+      drawRef.current = null;
+      setDrawPreview([]);
+      if (!root) return;
+      const finalPoint = toLocal(root, e, zoom);
+      points.push({ ...finalPoint, pressure: e.pressure || 0.5 });
+      if (points.length === 2 && Math.hypot(
+        points[1].x - points[0].x,
+        points[1].y - points[0].y,
+      ) < 2) {
+        points[1] = { ...points[1], x: points[1].x + 2 };
+      }
+
+      const minX = Math.min(...points.map((point) => point.x));
+      const minY = Math.min(...points.map((point) => point.y));
+      const width = Math.max(4, Math.max(...points.map((point) => point.x)) - minX);
+      const height = Math.max(4, Math.max(...points.map((point) => point.y)) - minY);
+      const rect = cssRectToPdf(
+        { left: minX, top: minY, width, height },
+        pageInfo,
+        1,
+      );
+      const id = `draw-${crypto.randomUUID()}`;
+      const drawing: DrawObject = {
+        id,
+        kind: "draw",
+        page: pageIndex,
+        rect: clampRect(rect, pageInfo),
+        rotation: 0,
+        z: objects.length,
+        locked: false,
+        opacity: 1,
+        stroke: "#111111",
+        strokeWidth: 2,
+        strokes: [{
+          points: points.map((point) => [
+            Math.max(0, Math.min(1, (point.x - minX) / width)),
+            Math.max(0, Math.min(1, 1 - (point.y - minY) / height)),
+            point.pressure,
+          ]),
+        }],
+      };
+      addObject(drawing);
+      return;
+    }
+
     // Highlight
     if (highlightDragRef.current?.active) {
       const drag = highlightDragRef.current;
@@ -606,7 +751,19 @@ export function ObjectLayer({
             }
           });
         } else if (localDrag && localDrag.id === pending.id) {
-          updateObject(pending.id, { rect: localDrag.rect });
+          const current = objects.find((obj) => obj.id === pending.id);
+          if (
+            pending.mode === "resize" &&
+            current &&
+            isTextLikeObject(current)
+          ) {
+            updateObject(pending.id, {
+              rect: localDrag.rect,
+              textBoxFixed: true,
+            } as Partial<PDFObject>);
+          } else {
+            updateObject(pending.id, { rect: localDrag.rect });
+          }
         }
       }
       setLocalDrag(null);
@@ -648,6 +805,22 @@ export function ObjectLayer({
         accept="image/*"
         onChange={handleImageUpload}
       />
+      {drawPreview.length > 0 && (
+        <svg
+          className="pointer-events-none absolute inset-0 z-40 h-full w-full"
+          viewBox={`0 0 ${rootSize.width} ${rootSize.height}`}
+          preserveAspectRatio="none"
+        >
+          <polyline
+            points={drawPreview.map(({ x, y }) => `${x},${y}`).join(" ")}
+            fill="none"
+            stroke="#111111"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      )}
 
       {/* ─── COVER LAYER ────────────────────────────────────────────────────
           Hides the original canvas pixels for edited / moved / deleted /
@@ -772,7 +945,7 @@ export function ObjectLayer({
             }}
             onPointerDown={(e) => onObjectPointerDown(e, obj, "move")}
           >
-            {obj.locked && (
+            {obj.locked && selectedSet.has(obj.id) && (
               <div className="absolute -top-2 -right-2 z-30 pointer-events-none bg-amber-500 text-white rounded-full p-1 shadow-md">
                 <Lock className="w-3 h-3" />
               </div>
@@ -938,7 +1111,7 @@ function textRunStyle(
   obj: TextLike,
 ): React.CSSProperties {
   return {
-    fontFamily: run.fontFamily ?? obj.fontFamily,
+    fontFamily: getFontCssStack(run.fontFamily ?? obj.fontFamily),
     fontSize: run.fontSize ?? obj.fontSize,
     fontWeight: (run.bold ?? obj.bold) ? 700 : 400,
     fontStyle: (run.italic ?? obj.italic) ? "italic" : "normal",
@@ -1127,6 +1300,7 @@ function ObjectContent({
   const renderedSignatureRef = useRef("");
   const wasEditingRef = useRef(false);
   const textDivRef = useRef<HTMLDivElement | null>(null);
+  const [fontLoadRevision, setFontLoadRevision] = useState(0);
 
   useLayoutEffect(() => {
     const editor = editorRef.current;
@@ -1188,7 +1362,9 @@ function ObjectContent({
         const current = state.objects[obj.id];
         if (!current || !isTextLikeObject(current)) return;
 
-        const nextWidth = Math.max(current.rect.w, width);
+        const nextWidth = current.textBoxFixed
+          ? current.rect.w
+          : Math.max(current.rect.w, width);
         const top = pageInfo.heightPt - current.rect.y - current.rect.h;
         const maxHeight = Math.max(0, pageInfo.heightPt - top);
         const nextHeight = Math.min(
@@ -1217,6 +1393,31 @@ function ObjectContent({
     [obj.id, pageInfo.heightPt, pageInfo.widthPt],
   );
 
+  useEffect(() => {
+    if (!textObj) return;
+    let active = true;
+    const families = Array.from(
+      new Set(runs.map((run) => run.fontFamily ?? textObj.fontFamily)),
+    );
+    void Promise.all(families.map((family) => ensureFontLoaded(family)))
+      .then(() => {
+        if (active) {
+          setFontLoadRevision((revision) => revision + 1);
+          const editor = editorRef.current ?? textDivRef.current;
+          if (editor) resizeTextBox(editor);
+        }
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          console.error("[PdfEditor] font loading failed", error);
+          setFontLoadRevision((revision) => revision + 1);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [runSignature, runs, textObj, resizeTextBox]);
+
   // Measure the same intrinsically-sized text surface used while editing.
   useLayoutEffect(() => {
     if (
@@ -1244,6 +1445,7 @@ function ObjectContent({
     pageInfo.heightPt,
     resizeTextBox,
     textObj,
+    fontLoadRevision,
   ]);
 
   if (textObj) {
@@ -1330,6 +1532,7 @@ function ObjectContent({
 
       return (
         <div
+          key="text-editor"
           ref={editorRef}
           contentEditable
           role="textbox"
@@ -1391,11 +1594,13 @@ function ObjectContent({
             }
           }}
           style={{
-            width: "max-content",
+            width: textObj.textBoxFixed ? "100%" : "max-content",
             minWidth: "100%",
-            maxWidth: Math.max(1, pageInfo.widthPt - textObj.rect.x),
-            minHeight: "100%",
-            fontFamily: textObj.fontFamily,
+            maxWidth: textObj.textBoxFixed
+              ? "100%"
+              : Math.max(1, pageInfo.widthPt - textObj.rect.x),
+              minHeight: "100%",
+              fontFamily: getFontCssStack(textObj.fontFamily),
             fontSize: textObj.fontSize,
             fontWeight: textObj.bold ? 700 : 400,
             fontStyle: textObj.italic ? "italic" : "normal",
@@ -1412,6 +1617,7 @@ function ObjectContent({
             whiteSpace: "pre-wrap",
             overflowWrap: "break-word",
             wordBreak: "break-word",
+            overflow: "visible",
             textDecoration:
               [
                 textObj.underline ? "underline" : "",
@@ -1429,18 +1635,21 @@ function ObjectContent({
       textObj.kind === "new-text" || textObj.dirty || isDragging;
     return (
       <div
+        key="text-preview"
         ref={textDivRef}
         onDoubleClick={(e) => {
           e.stopPropagation();
           setEditingId(obj.id);
         }}
         style={{
-          width: "max-content",
+          width: textObj.textBoxFixed ? "100%" : "max-content",
           minWidth: "100%",
-          maxWidth: Math.max(1, pageInfo.widthPt - textObj.rect.x),
+          maxWidth: textObj.textBoxFixed
+            ? "100%"
+            : Math.max(1, pageInfo.widthPt - textObj.rect.x),
           minHeight: "100%",
           display: "block",
-          fontFamily: textObj.fontFamily,
+          fontFamily: getFontCssStack(textObj.fontFamily),
           fontSize: textObj.fontSize,
           fontWeight: textObj.bold ? 700 : 400,
           fontStyle: textObj.italic ? "italic" : "normal",
@@ -1452,6 +1661,7 @@ function ObjectContent({
           whiteSpace: "pre-wrap",
           overflowWrap: "break-word",
           wordBreak: "break-word",
+          overflow: "visible",
           textAlign: textObj.align,
           lineHeight: textObj.lineHeight,
           letterSpacing: textObj.letterSpacing,
@@ -1657,7 +1867,7 @@ function ObjectContent({
         width="100%"
         height="100%"
         viewBox="0 0 100 100"
-        preserveAspectRatio="none"
+        preserveAspectRatio="xMidYMid meet"
       >
         <polyline
           points="20,50 45,75 85,20"

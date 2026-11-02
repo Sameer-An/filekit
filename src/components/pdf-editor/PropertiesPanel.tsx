@@ -8,7 +8,7 @@
 
     "use client";
 
-    import React from "react";
+    import React, { useRef } from "react";
     import {
     Lock,
     Unlock,
@@ -29,7 +29,17 @@
     import type { PDFObject, ShapeObject } from "@/lib/pdf-editor/types";
     import { TextProperties } from "./TextProperties";
 
-    export function PropertiesPanel() {
+    export interface PropertiesPanelLayout {
+        width: number;
+    }
+
+    export function PropertiesPanel({
+        layout,
+        onLayoutChange,
+    }: {
+        layout: PropertiesPanelLayout;
+        onLayoutChange: (layout: PropertiesPanelLayout) => void;
+    }) {
     const objects = usePdfEditor((s) => s.objects);
     const selectedIds = usePdfEditor((s) => s.selectedIds);
     const updateObject = usePdfEditor((s) => s.updateObject);
@@ -40,6 +50,45 @@
     const sendBackward = usePdfEditor((s) => s.sendBackward);
     const commit = usePdfEditor((s) => s.commit);
     const setPropertiesOpen = usePdfEditor((s) => s.setPropertiesOpen);
+    const panelRef = useRef<HTMLDivElement>(null);
+    const resizeRef = useRef<{
+        startX: number;
+        startWidth: number;
+        pointerId: number;
+    } | null>(null);
+
+    const beginPanelResize = (event: React.PointerEvent<HTMLDivElement>) => {
+        if (event.button !== 0) return;
+        const panel = panelRef.current;
+        if (!panel) return;
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        const panelRect = panel.getBoundingClientRect();
+        resizeRef.current = {
+            startX: event.clientX,
+            startWidth: panelRect.width,
+            pointerId: event.pointerId,
+        };
+    };
+
+    const resizePanel = (event: React.PointerEvent<HTMLDivElement>) => {
+        const resize = resizeRef.current;
+        const parent = panelRef.current?.parentElement;
+        if (!resize || !parent || event.pointerId !== resize.pointerId) return;
+        const parentRect = parent.getBoundingClientRect();
+        const maxWidth = Math.max(240, Math.min(560, parentRect.width - 16));
+        const width = Math.max(
+            240,
+            Math.min(maxWidth, resize.startWidth + resize.startX - event.clientX),
+        );
+        onLayoutChange({ width });
+    };
+
+    const endPanelResize = (event: React.PointerEvent<HTMLDivElement>) => {
+        if (resizeRef.current?.pointerId === event.pointerId) {
+            resizeRef.current = null;
+        }
+    };
 
     const selected: PDFObject[] = selectedIds
         .map((id) => objects[id])
@@ -118,12 +167,27 @@
     };
 
     return (
-        <div className="shrink-0 w-72 flex flex-col bg-zinc-950 border-l border-zinc-800">
-        <div className="flex items-center justify-between px-3 h-8 border-b border-zinc-800">
+        <div
+        ref={panelRef}
+        className="absolute z-40 flex flex-col overflow-hidden border border-zinc-700 bg-zinc-950 shadow-2xl"
+        style={{
+            right: 8,
+            top: 8,
+            bottom: 8,
+            width: layout.width,
+            maxWidth: "calc(100% - 16px)",
+            pointerEvents: "auto",
+        }}
+        >
+        <div
+            className="flex h-9 shrink-0 select-none items-center justify-between border-b border-zinc-800 px-3"
+        >
             <span className="text-[11px] uppercase tracking-wide text-zinc-500">
-            Properties
+            Properties · resize width
             </span>
             <button
+            type="button"
+            onPointerDown={(event) => event.stopPropagation()}
             onClick={() => setPropertiesOpen(false)}
             className="text-xs text-zinc-500 hover:text-zinc-300"
             >
@@ -242,7 +306,10 @@
                     value={single.rect.w}
                     onChange={(v) =>
                     updateObject(single.id, {
-                        rect: { ...single.rect, w: Math.max(4, v) },
+                        rect:
+                        single.kind === "checkmark"
+                            ? { ...single.rect, w: Math.max(4, v), h: Math.max(4, v) }
+                            : { ...single.rect, w: Math.max(4, v) },
                     })
                     }
                 />
@@ -251,7 +318,10 @@
                     value={single.rect.h}
                     onChange={(v) =>
                     updateObject(single.id, {
-                        rect: { ...single.rect, h: Math.max(4, v) },
+                        rect:
+                        single.kind === "checkmark"
+                            ? { ...single.rect, w: Math.max(4, v), h: Math.max(4, v) }
+                            : { ...single.rect, h: Math.max(4, v) },
                     })
                     }
                 />
@@ -309,6 +379,26 @@
             </div>
             )}
         </div>
+        <div
+            role="separator"
+            aria-label="Resize properties panel"
+            aria-orientation="vertical"
+            tabIndex={0}
+            className="absolute bottom-0 left-0 top-9 z-10 w-1 cursor-ew-resize hover:bg-emerald-500/60"
+            style={{ touchAction: "none" }}
+            onPointerDown={beginPanelResize}
+            onPointerMove={resizePanel}
+            onPointerUp={endPanelResize}
+            onPointerCancel={endPanelResize}
+            onKeyDown={(event) => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            event.preventDefault();
+            const direction = event.key === "ArrowLeft" ? 1 : -1;
+            onLayoutChange({
+                width: Math.max(240, Math.min(560, layout.width + direction * 16)),
+            });
+            }}
+        />
         </div>
     );
     }

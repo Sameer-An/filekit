@@ -706,6 +706,7 @@ export const usePdfEditor = create<PdfEditorState>((set, get) => ({
         ...get().overlays,
         ...patch,
       },
+      dirty: true,
     }),
 
   setPropertiesOpen: (open) => set({ propertiesOpen: open }),

@@ -1,252 +1,242 @@
-// src/components/pdf-editor/PageOverlays.tsx
-// Quick action panel for adding page numbers / headers / footers / watermark
-// to every page. Currently a small modal that writes `new-text` objects to
-// each page. Kept deliberately simple so it doesn't blow up scope.
-
 "use client";
 
-import React, { useState } from "react";
-import { Hash, X, Type, Droplets } from "lucide-react";
+import React from "react";
+import { Hash, Type, Droplets, X } from "lucide-react";
 import { usePdfEditor } from "@/lib/pdf-editor/store";
-import type { NewTextObject } from "@/lib/pdf-editor/types";
+import type { OverlaySettings } from "@/lib/pdf-editor/types";
 
 interface PageOverlaysProps {
-open: boolean;
-onOpenChange: (open: boolean) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }
 
-type Mode = "page-numbers" | "header" | "footer" | "watermark";
+type Align = "left" | "center" | "right";
 
 export function PageOverlays({ open, onOpenChange }: PageOverlaysProps) {
-const [mode, setMode] = useState<Mode>("page-numbers");
-const [headerText, setHeaderText] = useState("");
-const [footerText, setFooterText] = useState("");
-const [watermarkText, setWatermarkText] = useState("DRAFT");
+  const overlays = usePdfEditor((s) => s.overlays);
+  const setOverlays = usePdfEditor((s) => s.setOverlays);
+  const pages = usePdfEditor((s) => s.pages);
 
-const pages = usePdfEditor((s) => s.pages);
-const commit = usePdfEditor((s) => s.commit);
+  if (!open) return null;
 
-if (!open) return null;
+  const update = (patch: Partial<OverlaySettings>) => setOverlays(patch);
 
-const apply = () => {
-    commit("Apply page overlay", (d) => {
-    pages.forEach((page, index) => {
-        const w = page.widthPt;
-        const h = page.heightPt;
-        if (mode === "page-numbers") {
-        const id = `pgno-${crypto.randomUUID()}`;
-        const obj: NewTextObject = {
-            id,
-            kind: "new-text",
-            page: index,
-            rect: { x: w - 60, y: 18, w: 40, h: 16 },
-            rotation: 0,
-            z: 9999,
-            locked: false,
-            opacity: 1,
-            text: String(index + 1),
-            fontFamily: "Helvetica",
-            fontSize: 10,
-            bold: false,
-            italic: false,
-            underline: false,
-            color: "#666666",
-            align: "right",
-            lineHeight: 1.2,
-            letterSpacing: 0,
-        };
-        d.objects[id] = obj;
-        (d.pageObjectIds[index] ??= []).push(id);
-        } else if (mode === "header" && headerText.trim()) {
-        const id = `hdr-${crypto.randomUUID()}`;
-        const obj: NewTextObject = {
-            id,
-            kind: "new-text",
-            page: index,
-            rect: { x: 24, y: h - 36, w: w - 48, h: 20 },
-            rotation: 0,
-            z: 9999,
-            locked: false,
-            opacity: 1,
-            text: headerText,
-            fontFamily: "Helvetica",
-            fontSize: 10,
-            bold: false,
-            italic: false,
-            underline: false,
-            color: "#666666",
-            align: "center",
-            lineHeight: 1.2,
-            letterSpacing: 0,
-        };
-        d.objects[id] = obj;
-        (d.pageObjectIds[index] ??= []).push(id);
-        } else if (mode === "footer" && footerText.trim()) {
-        const id = `ftr-${crypto.randomUUID()}`;
-        const obj: NewTextObject = {
-            id,
-            kind: "new-text",
-            page: index,
-            rect: { x: 24, y: 18, w: w - 48, h: 20 },
-            rotation: 0,
-            z: 9999,
-            locked: false,
-            opacity: 1,
-            text: footerText,
-            fontFamily: "Helvetica",
-            fontSize: 10,
-            bold: false,
-            italic: false,
-            underline: false,
-            color: "#666666",
-            align: "center",
-            lineHeight: 1.2,
-            letterSpacing: 0,
-        };
-        d.objects[id] = obj;
-        (d.pageObjectIds[index] ??= []).push(id);
-        } else if (mode === "watermark" && watermarkText.trim()) {
-        const id = `wm-${crypto.randomUUID()}`;
-        const obj: NewTextObject = {
-            id,
-            kind: "new-text",
-            page: index,
-            rect: { x: 0, y: h / 2 - 20, w, h: 40 },
-            rotation: -25,
-            z: 0,
-            locked: true,
-            opacity: 0.25,
-            text: watermarkText,
-            fontFamily: "Helvetica",
-            fontSize: 60,
-            bold: true,
-            italic: false,
-            underline: false,
-            color: "#888888",
-            align: "center",
-            lineHeight: 1.2,
-            letterSpacing: 0,
-        };
-        d.objects[id] = obj;
-        // Watermark goes to the bottom of the z-order.
-        (d.pageObjectIds[index] ??= []).unshift(id);
-        }
-    });
-    });
-    onOpenChange(false);
-};
-
-return (
+  return (
     <div
-    className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
-    onClick={() => onOpenChange(false)}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      onClick={() => onOpenChange(false)}
     >
-    <div
-        className="w-full max-w-md rounded-2xl bg-zinc-950 border border-zinc-800 text-zinc-100 flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-    >
-        <div className="flex items-center justify-between px-4 h-11 border-b border-zinc-800">
-        <h2 className="text-sm font-semibold">Page overlays</h2>
-        <button
+      <div
+        className="flex max-h-[90vh] w-full max-w-xl flex-col rounded-2xl border border-zinc-800 bg-zinc-950 text-zinc-100"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex h-11 items-center justify-between border-b border-zinc-800 px-4">
+          <div>
+            <h2 className="text-sm font-semibold">Advanced page overlays</h2>
+          </div>
+          <button
+            type="button"
             onClick={() => onOpenChange(false)}
-            className="p-1.5 rounded hover:bg-zinc-800"
+            className="rounded p-1.5 hover:bg-zinc-800"
             title="Close"
-        >
-            <X className="w-4 h-4" />
-        </button>
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
-        <div className="flex gap-1 p-2 border-b border-zinc-800">
-        <Tab
-            active={mode === "page-numbers"}
-            onClick={() => setMode("page-numbers")}
-        >
-            <Hash className="w-3.5 h-3.5" /> Numbers
-        </Tab>
-        <Tab active={mode === "header"} onClick={() => setMode("header")}>
-            <Type className="w-3.5 h-3.5" /> Header
-        </Tab>
-        <Tab active={mode === "footer"} onClick={() => setMode("footer")}>
-            <Type className="w-3.5 h-3.5" /> Footer
-        </Tab>
-        <Tab
-            active={mode === "watermark"}
-            onClick={() => setMode("watermark")}
-        >
-            <Droplets className="w-3.5 h-3.5" /> Watermark
-        </Tab>
-        </div>
-        <div className="p-4 space-y-3 text-xs">
-        {mode === "header" && (
-            <input
-            value={headerText}
-            onChange={(e) => setHeaderText(e.target.value)}
-            placeholder="Header text"
-            className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5"
-            />
-        )}
-        {mode === "footer" && (
-            <input
-            value={footerText}
-            onChange={(e) => setFooterText(e.target.value)}
-            placeholder="Footer text"
-            className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5"
-            />
-        )}
-        {mode === "watermark" && (
-            <input
-            value={watermarkText}
-            onChange={(e) => setWatermarkText(e.target.value)}
-            placeholder="Watermark text"
-            className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5"
-            />
-        )}
-        {mode === "page-numbers" && (
-            <p className="text-zinc-500">
-            Adds &ldquo;Page N&rdquo; to the bottom-right corner of every
-            page.
+
+        <div className="space-y-5 overflow-y-auto p-4 text-xs">
+          <section className="space-y-3">
+            <h3 className="font-medium text-zinc-200">Content</h3>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <OverlayTextField
+                label="Header"
+                value={overlays.header}
+                placeholder="Header text"
+                onChange={(header) => update({ header })}
+              />
+              <OverlayTextField
+                label="Footer"
+                value={overlays.footer}
+                placeholder="Footer text"
+                onChange={(footer) => update({ footer })}
+              />
+              <OverlayTextField
+                label="Watermark"
+                value={overlays.watermark}
+                placeholder="Watermark text"
+                onChange={(watermark) => update({ watermark })}
+              />
+              <label className="flex items-center gap-2 self-end rounded border border-zinc-800 px-3 py-2">
+                <input
+                  type="checkbox"
+                  checked={overlays.pageNumbers}
+                  onChange={(event) =>
+                    update({ pageNumbers: event.target.checked })
+                  }
+                />
+                <Hash className="h-3.5 w-3.5" />
+                Page numbers
+              </label>
+            </div>
+            <p className="text-[11px] text-zinc-500">
+              Use {"{page}"} and {"{total}"} in header, footer, or watermark text.
             </p>
-        )}
-        <p className="text-zinc-500">
-            Applied to all {pages.length} pages. Each overlay becomes a regular
-            text object you can move or delete afterwards.
-        </p>
+          </section>
+
+          <section className="space-y-3">
+            <h3 className="font-medium text-zinc-200">Alignment</h3>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <AlignmentSelect
+                label="Header"
+                value={overlays.headerAlign}
+                onChange={(headerAlign) => update({ headerAlign })}
+              />
+              <AlignmentSelect
+                label="Footer"
+                value={overlays.footerAlign}
+                onChange={(footerAlign) => update({ footerAlign })}
+              />
+              <AlignmentSelect
+                label="Page numbers"
+                value={overlays.pageNumberAlign}
+                onChange={(pageNumberAlign) => update({ pageNumberAlign })}
+              />
+            </div>
+          </section>
+
+          <section className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Type className="h-3.5 w-3.5 text-zinc-400" />
+              <h3 className="font-medium text-zinc-200">Page margins</h3>
+              <span className="text-zinc-500">(points)</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <MarginField
+                label="Left"
+                value={overlays.leftMargin}
+                onChange={(leftMargin) => update({ leftMargin })}
+              />
+              <MarginField
+                label="Right"
+                value={overlays.rightMargin}
+                onChange={(rightMargin) => update({ rightMargin })}
+              />
+              <MarginField
+                label="Top"
+                value={overlays.topMargin}
+                onChange={(topMargin) => update({ topMargin })}
+              />
+              <MarginField
+                label="Bottom"
+                value={overlays.bottomMargin}
+                onChange={(bottomMargin) => update({ bottomMargin })}
+              />
+            </div>
+            <p className="text-[11px] text-zinc-500">
+              Default margins are 36 pt (0.5 in). These settings apply to the
+              header, footer, and page numbers on all {pages.length} pages.
+            </p>
+          </section>
+
+          <section className="rounded border border-zinc-800 bg-zinc-900/60 p-3">
+            <div className="mb-2 flex items-center gap-2 font-medium text-zinc-200">
+              <Droplets className="h-3.5 w-3.5" />
+              Watermark
+            </div>
+            <p className="text-[11px] text-zinc-400">
+              Watermarks are centered on each page. Text overlays are exported
+              as editable PDF content and included in the editor autosave.
+            </p>
+          </section>
         </div>
-        <div className="flex items-center justify-end gap-2 px-4 h-12 border-t border-zinc-800">
-        <button
+
+        <div className="flex h-12 items-center justify-end gap-2 border-t border-zinc-800 px-4">
+          <button
+            type="button"
             onClick={() => onOpenChange(false)}
-            className="px-3 py-1.5 rounded text-xs border border-zinc-700 hover:bg-zinc-800"
-        >
-            Cancel
-        </button>
-        <button
-            onClick={apply}
-            className="px-3 py-1.5 rounded text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-medium"
-        >
-            Apply to all pages
-        </button>
+            className="rounded border border-zinc-700 px-3 py-1.5 text-xs hover:bg-zinc-800"
+          >
+            Done
+          </button>
         </div>
+      </div>
     </div>
-    </div>
-);
+  );
 }
 
-function Tab({
-active,
-onClick,
-children,
+function OverlayTextField({
+  label,
+  value,
+  placeholder,
+  onChange,
 }: {
-active: boolean;
-onClick: () => void;
-children: React.ReactNode;
+  label: string;
+  value: string;
+  placeholder: string;
+  onChange: (value: string) => void;
 }) {
-return (
-    <button
-    onClick={onClick}
-    className={`flex items-center gap-1 px-2 py-1 rounded text-xs ${
-        active ? "bg-emerald-600 text-white" : "hover:bg-zinc-800 text-zinc-300"
-    }`}
-    >
-    {children}
-    </button>
-);
+  return (
+    <label className="space-y-1">
+      <span className="block text-zinc-400">{label}</span>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5"
+      />
+    </label>
+  );
+}
+
+function AlignmentSelect({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: Align;
+  onChange: (value: Align) => void;
+}) {
+  return (
+    <label className="space-y-1">
+      <span className="block text-zinc-400">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value as Align)}
+        className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5"
+      >
+        <option value="left">Left</option>
+        <option value="center">Center</option>
+        <option value="right">Right</option>
+      </select>
+    </label>
+  );
+}
+
+function MarginField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="space-y-1">
+      <span className="block text-zinc-400">{label}</span>
+      <input
+        type="number"
+        min={0}
+        max={1000}
+        step={1}
+        value={Number.isFinite(value) ? value : 36}
+        onChange={(event) => {
+          const parsed = Number(event.target.value);
+          if (Number.isFinite(parsed)) onChange(Math.max(0, parsed));
+        }}
+        className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5"
+      />
+    </label>
+  );
 }

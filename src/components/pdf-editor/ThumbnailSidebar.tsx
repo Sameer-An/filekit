@@ -13,7 +13,11 @@
     } from "lucide-react";
     import { usePdfEditor } from "@/lib/pdf-editor/store";
     import type { PageOp, PageInfo } from "@/lib/pdf-editor/types";
-    import { defaultBlankSize, applyPageOp } from "@/lib/pdf-editor/page-ops";
+    import {
+      defaultBlankSize,
+      applyPageOp,
+      pageIndexForPosition,
+    } from "@/lib/pdf-editor/page-ops";
     import { getCachedPdf } from "@/lib/pdf-editor/pdfjs-cache";
     import { getPdfjs, getPage } from "@/lib/pdf-editor/pdfjs";
     import { pageUid, rotatedPageSize } from "@/lib/pdf-editor/coords";
@@ -66,8 +70,32 @@
             d.pageObjectIds = result.pageObjectIds;
             d.objects = result.objects;
         });
+        if (op.op === "move") {
+            const nextCurrentPage =
+            currentPage === op.fromIndex
+                ? op.toIndex
+                : op.fromIndex < op.toIndex &&
+                    currentPage > op.fromIndex &&
+                    currentPage <= op.toIndex
+                  ? currentPage - 1
+                  : op.toIndex < op.fromIndex &&
+                      currentPage >= op.toIndex &&
+                      currentPage < op.fromIndex
+                    ? currentPage + 1
+                    : currentPage;
+            if (nextCurrentPage !== currentPage) setCurrentPage(nextCurrentPage);
+        }
         },
-        [commit],
+        [commit, currentPage, setCurrentPage],
+    );
+
+    const movePageToPosition = useCallback(
+        (index: number, targetIndex: number) => {
+        if (index !== targetIndex) {
+            applyOp({ op: "move", fromIndex: index, toIndex: targetIndex }, "Reorder page");
+        }
+        },
+        [applyOp],
     );
 
     const onDragStart = (index: number) => () => setDragFrom(index);
@@ -143,7 +171,16 @@
                 active={currentPage === i}
                 isDragging={dragFrom === i}
                 isOver={dragOver === i}
-                onSelect={() => setCurrentPage(i)}
+                onSelect={() => {
+                setCurrentPage(i);
+                window.dispatchEvent(
+                    new CustomEvent("pdf-editor:scroll-to-page", {
+                    detail: { index: i },
+                    }),
+                );
+                }}
+                pageCount={pages.length}
+                onSetPagePosition={movePageToPosition}
                 onDragStart={onDragStart(i)}
                 onDragOver={onDragOver(i)}
                 onDrop={onDrop(i)}
@@ -170,6 +207,8 @@
     isDragging: boolean;
     isOver: boolean;
     onSelect: () => void;
+    pageCount: number;
+    onSetPagePosition: (index: number, targetIndex: number) => void;
     onDragStart: () => void;
     onDragOver: (e: React.DragEvent) => void;
     onDrop: (e: React.DragEvent) => void;
@@ -188,6 +227,8 @@
     isDragging,
     isOver,
     onSelect,
+    pageCount,
+    onSetPagePosition,
     onDragStart,
     onDragOver,
     onDrop,
@@ -203,6 +244,37 @@
     const [visible, setVisible] = useState(false);
     const [ready, setReady] = useState(false);
     const [error, setError] = useState(false);
+    const [pagePositionDraft, setPagePositionDraft] = useState<{
+        pageKey: string;
+        value: string;
+        error: string | null;
+    } | null>(null);
+    const pageKey = pageUid(page);
+    const pagePositionInput =
+        pagePositionDraft?.pageKey === pageKey
+        ? pagePositionDraft.value
+        : String(index + 1);
+    const pagePositionError =
+        pagePositionDraft?.pageKey === pageKey ? pagePositionDraft.error : null;
+
+    const commitPagePosition = () => {
+        const trimmed = pagePositionInput.trim();
+        if (!trimmed) {
+        setPagePositionDraft(null);
+        return;
+        }
+        const targetIndex = pageIndexForPosition(trimmed, pageCount);
+        if (targetIndex === null) {
+        setPagePositionDraft({
+            pageKey,
+            value: pagePositionInput,
+            error: "Enter a whole-number page position.",
+        });
+        return;
+        }
+        setPagePositionDraft(null);
+        onSetPagePosition(index, targetIndex);
+    };
 
     const { w: wPt, h: hPt } = rotatedPageSize(page);
     const thumbWidth = 140;
@@ -348,11 +420,46 @@
         </div>
 
         <div className="absolute inset-x-0 bottom-0 bg-zinc-950/80 text-[10px] text-zinc-300 px-1 py-0.5 flex items-center justify-between">
-            <span>{index + 1}</span>
+            <input
+            type="number"
+            step={1}
+            aria-label={`Move page ${index + 1} to position`}
+            title={pagePositionError ?? "Move this page to the entered position"}
+            value={pagePositionInput}
+            onChange={(event) => {
+                setPagePositionDraft({
+                pageKey,
+                value: event.target.value,
+                error: null,
+                });
+            }}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === "Enter") {
+                event.preventDefault();
+                event.currentTarget.blur();
+                } else if (event.key === "Escape") {
+                setPagePositionDraft(null);
+                event.currentTarget.blur();
+                }
+            }}
+            onBlur={commitPagePosition}
+            className={`w-14 rounded border bg-zinc-950/80 px-1 py-0.5 text-[10px] tabular-nums ${
+                pagePositionError
+                ? "border-red-500 text-red-300"
+                : "border-transparent text-zinc-200"
+            }`}
+            />
             {page.rotation !== 0 && (
             <span className="text-emerald-400">{page.rotation}°</span>
             )}
         </div>
+        {pagePositionError && (
+            <span className="absolute bottom-7 left-1 z-20 rounded bg-zinc-950 px-1 text-[9px] text-red-300">
+            {pagePositionError}
+            </span>
+        )}
 
         <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 flex items-center gap-0.5 bg-zinc-950/80 rounded">
             <button

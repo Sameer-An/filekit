@@ -60,7 +60,35 @@ export function PageViewport() {
         return;
       const st = usePdfEditor.getState();
       const mod = e.ctrlKey || e.metaKey;
-
+      if (e.key === "Tab") {
+        const target = e.target as HTMLElement | null;
+        if (
+          target &&
+          (target.isContentEditable ||
+            target.tagName === "INPUT" ||
+            target.tagName === "TEXTAREA" ||
+            target.tagName === "SELECT" ||
+            target.tagName === "BUTTON" ||
+            target.closest('[role="dialog"]'))
+        ) return;
+        const ids = (st.pageObjectIds[st.currentPage] ?? []).filter((id) => {
+          const object = st.objects[id];
+          return object && !object.deleted;
+        });
+        if (ids.length === 0) return;
+        e.preventDefault();
+        const selectedIndex = ids.findIndex((id) =>
+          st.selectedIds.includes(id),
+        );
+        const nextIndex =
+          selectedIndex < 0
+            ? e.shiftKey
+              ? ids.length - 1
+              : 0
+            : (selectedIndex + (e.shiftKey ? -1 : 1) + ids.length) % ids.length;
+        st.selectObjects([ids[nextIndex]]);
+        return;
+      }
       if (e.key === "Delete" || e.key === "Backspace") {
         if (st.selectedIds.length) {
           e.preventDefault();
@@ -157,6 +185,21 @@ export function PageViewport() {
     return () => clearTimeout(t);
   }, [zoom]);
 
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      const factor = Math.exp(-event.deltaY * 0.0015);
+      setZoom(usePdfEditor.getState().zoom * factor);
+    };
+
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [setZoom]);
+
   // Container size.
   const hasPages = pages.length > 0;
   useEffect(() => {
@@ -192,6 +235,21 @@ export function PageViewport() {
     };
   }, [pages, zoom, view.w]);
 
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const scrollToPage = (event: Event) => {
+      const { index } = (event as CustomEvent<{ index: number }>).detail;
+      const top = layout.tops[index];
+      if (top === undefined) return;
+      setCurrentPage(index);
+      el.scrollTo({ top: Math.max(0, top - PAD_Y), behavior: "smooth" });
+    };
+    window.addEventListener("pdf-editor:scroll-to-page", scrollToPage);
+    return () =>
+      window.removeEventListener("pdf-editor:scroll-to-page", scrollToPage);
+  }, [layout, setCurrentPage]);
+
   // Auto-fit (keeps fitMode, so it also re-fits on window resize).
   useEffect(() => {
     if (fitMode === "none" || pages.length === 0 || view.w === 0) return;
@@ -213,12 +271,6 @@ export function PageViewport() {
     el.scrollTop = layout.tops[page] + frac * layout.heights[page];
   }, [zoom, layout]);
 
-  // Update ref inside useEffect to prevent React 19 render-phase mutation error
-  const layoutRef = useRef(layout);
-  useEffect(() => {
-    layoutRef.current = layout;
-  }, [layout]);
-
   // Track the page under the top third of the viewport (rAF throttled).
   useEffect(() => {
     const el = scrollRef.current;
@@ -229,7 +281,7 @@ export function PageViewport() {
       raf = requestAnimationFrame(() => {
         raf = 0;
         const top = el.scrollTop;
-        const { tops, heights } = layoutRef.current;
+        const { tops, heights } = layout;
         setScrollTop(top);
         const probe = top + el.clientHeight / 3;
         let best = 0;
@@ -251,7 +303,7 @@ export function PageViewport() {
       el.removeEventListener("scroll", onScroll);
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [pages.length, setScrollPage, setCurrentPage]);
+  }, [layout, pages.length, setScrollPage, setCurrentPage]);
 
   // Thumbnail click => scroll (only when the request did not come from scrolling).
   useEffect(() => {

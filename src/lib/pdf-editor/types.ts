@@ -31,6 +31,8 @@ export interface PageInfo {
   index: number;
   /** Stable unique id of this page instance (survives reorder/duplicate). */
   uid?: string;
+  /** Legacy saved value; the editor now displays and exports array order. */
+  pageLabel?: number;
   /** Un-rotated, un-cropped page box width in points. */
   widthPt: Pt;
   /** Un-rotated, un-cropped page box height in points. */
@@ -144,6 +146,8 @@ export interface TextRunObject extends BaseObject {
   originalText: string;
   /** Styled segments. When present, authoritative for content and character formatting. */
   runs?: StyledTextRun[];
+  /** User-resized text objects keep their frame and wrap text to its width. */
+  textBoxFixed?: boolean;
   /** Original styled segments for revert; absent means use `originalText` + object defaults. */
   originalRuns?: StyledTextRun[];
   /** Font name reported by pdfjs (`fontName`). */
@@ -183,6 +187,13 @@ export interface OverlaySettings {
   footer: string;
   watermark: string;
   pageNumbers: boolean;
+  headerAlign: "left" | "center" | "right";
+  footerAlign: "left" | "center" | "right";
+  pageNumberAlign: "left" | "center" | "right";
+  leftMargin: number;
+  rightMargin: number;
+  topMargin: number;
+  bottomMargin: number;
 }
 
 export interface NewTextObject extends BaseObject {
@@ -195,6 +206,8 @@ export interface NewTextObject extends BaseObject {
   text: string;
   /** Styled segments. When present, authoritative for content and character formatting. */
   runs?: StyledTextRun[];
+  /** User-resized text objects keep their frame and wrap text to its width. */
+  textBoxFixed?: boolean;
   fontFamily: string;
   fontSize: Pt;
   bold: boolean;

@@ -17,6 +17,13 @@
     footer: "",
     watermark: "",
     pageNumbers: false,
+    headerAlign: "center",
+    footerAlign: "center",
+    pageNumberAlign: "right",
+    leftMargin: 36,
+    rightMargin: 36,
+    topMargin: 36,
+    bottomMargin: 36,
     };
 
     export function getOverlayRects(
@@ -27,20 +34,25 @@
     ): OverlayRect[] {
     const s = settings ?? DEFAULT_OVERLAYS;
     const rects: OverlayRect[] = [];
-    const margin = 36; // 0.5 inch
     const w = page.widthPt;
     const h = page.heightPt;
+    const left = Math.max(0, Math.min(w, s.leftMargin ?? 36));
+    const right = Math.max(0, Math.min(w - left, s.rightMargin ?? 36));
+    const top = Math.max(0, Math.min(Math.max(0, h - 20), s.topMargin ?? 36));
+    const bottom = Math.max(0, Math.min(Math.max(0, h - 20), s.bottomMargin ?? 36));
+    const contentWidth = Math.max(0, w - left - right);
 
+    const pageNumber = pageIndex + 1;
     const resolveText = (txt: string) =>
         txt
-        .replace(/{page}/g, String(pageIndex + 1))
+        .replace(/{page}/g, String(pageNumber))
         .replace(/{total}/g, String(totalPages));
 
     if (s.header) {
         rects.push({
         text: resolveText(s.header),
-        rect: { x: margin, y: h - margin - 20, w: w - margin * 2, h: 20 },
-        align: "center",
+        rect: { x: left, y: h - top - 20, w: contentWidth, h: 20 },
+        align: s.headerAlign ?? "center",
         rotation: 0,
         opacity: 1,
         fontSize: 10,
@@ -50,8 +62,8 @@
     if (s.footer) {
         rects.push({
         text: resolveText(s.footer),
-        rect: { x: margin, y: margin, w: w - margin * 2, h: 20 },
-        align: "center",
+        rect: { x: left, y: bottom, w: contentWidth, h: 20 },
+        align: s.footerAlign ?? "center",
         rotation: 0,
         opacity: 1,
         fontSize: 10,
@@ -60,9 +72,9 @@
     }
     if (s.pageNumbers) {
         rects.push({
-        text: `${pageIndex + 1} / ${totalPages}`,
-        rect: { x: w - margin - 50, y: margin, w: 50, h: 20 },
-        align: "right",
+        text: `${pageNumber} / ${totalPages}`,
+        rect: { x: left, y: bottom, w: contentWidth, h: 20 },
+        align: s.pageNumberAlign ?? "right",
         rotation: 0,
         opacity: 1,
         fontSize: 10,

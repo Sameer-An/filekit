@@ -19,6 +19,7 @@ export function clonePageInfo(p: PageInfo): PageInfo {
 return {
     index: p.index,
     uid: p.uid,
+    pageLabel: p.pageLabel,
     widthPt: p.widthPt,
     heightPt: p.heightPt,
     rotation: p.rotation,
@@ -36,6 +37,17 @@ if (neighbour) {
 }
 // US Letter at 72 dpi
 return { widthPt: 612, heightPt: 792 };
+}
+
+/** Convert a typed 1-based position to a valid page-array index. */
+export function pageIndexForPosition(
+value: string,
+pageCount: number,
+): number | null {
+if (pageCount < 1 || value.trim() === "") return null;
+const position = Number(value);
+if (!Number.isFinite(position) || !Number.isInteger(position)) return null;
+return Math.max(0, Math.min(pageCount - 1, position - 1));
 }
 
 /**
@@ -129,8 +141,10 @@ switch (op.op) {
     }
 
     // Keep `index` = SOURCE page so the copy renders/exports the same content.
+    const duplicatePage = clonePageInfo(srcPage);
+    delete duplicatePage.pageLabel;
     pages.splice(idx + 1, 0, {
-        ...clonePageInfo(srcPage),
+        ...duplicatePage,
         uid: crypto.randomUUID(),
     });
 

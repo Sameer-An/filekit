@@ -18,7 +18,10 @@
     import { ToolRail } from "./ToolRail";
     import { ThumbnailSidebar } from "./ThumbnailSidebar";
     import { PageViewport } from "./PageViewport";
-    import { PropertiesPanel } from "./PropertiesPanel";
+    import {
+        PropertiesPanel,
+        type PropertiesPanelLayout,
+    } from "./PropertiesPanel";
     import { StatusBar } from "./StatusBar";
     import { GridStyleDialog } from "./GridStyleDialog";
     import { SignatureDialog } from "./SignatureDialog";
@@ -31,6 +34,9 @@
     const [gridDialogOpen, setGridDialogOpen] = useState(false);
     const [signatureDialogOpen, setSignatureDialogOpen] = useState(false);
     const [overlaysOpen, setOverlaysOpen] = useState(false);
+    const [editorTheme, setEditorTheme] = useState<"dark" | "light">("dark");
+    const [propertiesLayout, setPropertiesLayout] =
+        useState<PropertiesPanelLayout>({ width: 288 });
 
     useEffect(() => {
         const handler = () => setOverlaysOpen(true);
@@ -66,20 +72,32 @@
     }, [activeTool, selectTool]);
 
     return (
-        <div className="h-screen w-full flex flex-col bg-zinc-900 text-zinc-100 overflow-hidden">
+        <div
+            id="pdf-editor-app"
+            className={`pdf-editor-theme-${editorTheme} h-screen w-full flex flex-col bg-zinc-900 text-zinc-100 overflow-hidden`}
+        >
         <Toolbar
             onGridDialog={() => setGridDialogOpen(true)}
             onToggleProperties={() => setPropertiesOpen(!propertiesOpen)}
             propertiesOpen={propertiesOpen}
+            lightTheme={editorTheme === "light"}
+            onToggleTheme={() =>
+            setEditorTheme((theme) => (theme === "dark" ? "light" : "dark"))
+            }
         />
 
-        <div className="flex-1 flex min-h-0">
+        <div className="relative flex-1 flex min-h-0">
             <ToolRail />
             <ThumbnailSidebar />
-            <div className="flex-1 min-w-0 min-h-0">
+            <div className="relative z-0 flex-1 min-w-0 min-h-0">
             <PageViewport />
             </div>
-            {propertiesOpen && <PropertiesPanel />}
+            {propertiesOpen && (
+            <PropertiesPanel
+                layout={propertiesLayout}
+                onLayoutChange={setPropertiesLayout}
+            />
+            )}
         </div>
 
         <StatusBar />

@@ -4,7 +4,7 @@
 
     "use client";
 
-    import React, { useCallback, useMemo, useState } from "react";
+    import React, { useCallback, useState } from "react";
     import {
     Undo2,
     Redo2,
@@ -18,22 +18,29 @@
     X,
     ChevronDown,
     PanelRight,
+    Sun,
+    Moon,
     } from "lucide-react";
-    import { usePdfEditor, peekRedo, peekUndo } from "@/lib/pdf-editor/store";
+    import { usePdfEditor } from "@/lib/pdf-editor/store";
     import { exportPdf } from "@/lib/pdf-editor/export";
     import type { ExportOptions } from "@/lib/pdf-editor/types";
+    import { getUploadedFontForExport } from "@/lib/pdf-editor/uploaded-fonts";
     import { downloadBlob } from "@/lib/utils";
 
     interface ToolbarProps {
     onGridDialog: () => void;
     onToggleProperties: () => void;
     propertiesOpen: boolean;
+    lightTheme: boolean;
+    onToggleTheme: () => void;
     }
 
     export function Toolbar({
     onGridDialog,
     onToggleProperties,
     propertiesOpen,
+    lightTheme,
+    onToggleTheme,
     }: ToolbarProps) {
     const fileName = usePdfEditor((s) => s.fileName);
     const zoom = usePdfEditor((s) => s.zoom);
@@ -91,6 +98,29 @@
             requestedPassword: null,
         };
 
+        const fontFamilies = new Set<string>();
+        for (const obj of Object.values(s.objects)) {
+            if (obj.kind !== "text-run" && obj.kind !== "new-text") continue;
+            fontFamilies.add(obj.fontFamily);
+            for (const run of obj.runs ?? []) {
+                if (run.fontFamily) fontFamilies.add(run.fontFamily);
+            }
+        }
+        const uploadedFonts = Object.create(null) as Record<
+            string,
+            NonNullable<Awaited<ReturnType<typeof getUploadedFontForExport>>>
+        >;
+        for (const family of fontFamilies) {
+            if (!family.endsWith(" (Imported)")) continue;
+            const font = await getUploadedFontForExport(family);
+            if (!font) {
+                throw new Error(
+                    `Imported font "${family}" is missing from this browser. Re-import it before exporting.`,
+                );
+            }
+            uploadedFonts[family] = font;
+        }
+
         const bytes = await exportPdf({
             originalBytes: s.originalBytes,
             pages: s.pages,
@@ -104,6 +134,7 @@
             pageNumbers: false,
             },
             options: exportOptions,
+            uploadedFonts,
         });
 
         const blob = new Blob([new Uint8Array(bytes)], {
@@ -230,6 +261,19 @@
             }`}
             >
             <PanelRight className="w-4 h-4" />
+            </button>
+            <button
+            type="button"
+            onClick={onToggleTheme}
+            title={`Switch to ${lightTheme ? "dark" : "light"} editor theme`}
+            aria-label={`Switch to ${lightTheme ? "dark" : "light"} editor theme`}
+            className="p-1.5 rounded hover:bg-zinc-800"
+            >
+            {lightTheme ? (
+                <Moon className="w-4 h-4" />
+            ) : (
+                <Sun className="w-4 h-4" />
+            )}
             </button>
         </div>
 

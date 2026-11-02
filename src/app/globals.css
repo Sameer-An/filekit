@@ -97,6 +97,58 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+#pdf-editor-app.pdf-editor-theme-light {
+  background-color: #f4f4f5;
+  color: #18181b;
+}
+
+#pdf-editor-app.pdf-editor-theme-light .bg-zinc-950,
+#pdf-editor-app.pdf-editor-theme-light [class~="bg-zinc-950/80"] {
+  background-color: #ffffff !important;
+}
+
+#pdf-editor-app.pdf-editor-theme-light .bg-zinc-900,
+#pdf-editor-app.pdf-editor-theme-light [class~="bg-zinc-900/60"] {
+  background-color: #f4f4f5 !important;
+}
+
+#pdf-editor-app.pdf-editor-theme-light .bg-zinc-800,
+#pdf-editor-app.pdf-editor-theme-light [class~="bg-zinc-800/50"] {
+  background-color: #e4e4e7 !important;
+}
+
+#pdf-editor-app.pdf-editor-theme-light .text-zinc-100,
+#pdf-editor-app.pdf-editor-theme-light .text-zinc-200,
+#pdf-editor-app.pdf-editor-theme-light .text-zinc-300 {
+  color: #27272a !important;
+}
+
+#pdf-editor-app.pdf-editor-theme-light .text-zinc-400,
+#pdf-editor-app.pdf-editor-theme-light .text-zinc-500,
+#pdf-editor-app.pdf-editor-theme-light .text-zinc-600 {
+  color: #52525b !important;
+}
+
+#pdf-editor-app.pdf-editor-theme-light .border-zinc-700,
+#pdf-editor-app.pdf-editor-theme-light .border-zinc-800 {
+  border-color: #d4d4d8 !important;
+}
+
+#pdf-editor-app.pdf-editor-theme-light .hover\:bg-zinc-800:hover,
+#pdf-editor-app.pdf-editor-theme-light .hover\:bg-zinc-900:hover {
+  background-color: #e4e4e7 !important;
+}
+
+#pdf-editor-app.pdf-editor-theme-light input:not([type="checkbox"]):not([type="radio"]),
+#pdf-editor-app.pdf-editor-theme-light select,
+#pdf-editor-app.pdf-editor-theme-light textarea {
+  color: #18181b;
+}
+
+#pdf-editor-app.pdf-editor-theme-light [class~="bg-zinc-950/80"] input {
+  background-color: #ffffff !important;
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;

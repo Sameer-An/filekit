@@ -7,7 +7,8 @@
 // This satisfies react-hooks/rules-of-hooks. Handlers are plain functions (no useCallback/useRef)
 // so React Compiler can memoize them automatically.
 "use client";
-import { useEffect, useState } from "react";
+import { Upload } from "lucide-react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { usePdfEditor } from "@/lib/pdf-editor/store";
 import type {
@@ -18,60 +19,20 @@ import type {
 } from "@/lib/pdf-editor/types";
 import {
   applyStyleToRange,
+  materializeRuns,
   styleForRange,
   type StyledRunPatch,
 } from "@/lib/pdf-editor/text-runs";
-
-// ─── Font catalogue ──────────────────────────────────────────────────────────
-
-interface FontGroup {
-  label: string;
-  fonts: string[];
-}
-
-const FONT_GROUPS: FontGroup[] = [
-  {
-    label: "Sans-serif",
-    fonts: [
-      "Arial",
-      "Helvetica",
-      "Verdana",
-      "Tahoma",
-      "Trebuchet MS",
-      "Segoe UI",
-      "Calibri",
-      "Roboto",
-      "Open Sans",
-      "Lato",
-      "Montserrat",
-      "Poppins",
-      "Inter",
-      "Noto Sans",
-    ],
-  },
-  {
-    label: "Serif",
-    fonts: [
-      "Times New Roman",
-      "Georgia",
-      "Cambria",
-      "Garamond",
-      "Palatino",
-      "Merriweather",
-      "Playfair Display",
-    ],
-  },
-  {
-    label: "Monospace",
-    fonts: ["Courier New", "Consolas", "Roboto Mono"],
-  },
-  {
-    label: "Display",
-    fonts: ["Comic Sans MS", "Impact"],
-  },
-];
-
-const ALL_FONTS = FONT_GROUPS.flatMap((g) => g.fonts);
+import {
+  FONT_CATALOGUE,
+  getFontCandidateGroups,
+  getFontCssStack,
+} from "@/lib/pdf-editor/font-catalogue";
+import {
+  importUploadedFont,
+  loadUploadedFontCatalogue,
+} from "@/lib/pdf-editor/uploaded-fonts";
+import type { UploadedFontMetadata } from "@/lib/pdf-editor/idb";
 
 const COMMON_SIZES = [
   6, 8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 60, 72,
@@ -175,6 +136,26 @@ function mixedStyle(
   return first ?? false;
 }
 
+function fontForRange(
+  obj: TextLike,
+  start: number,
+  end: number,
+): string | "Mixed" {
+  const runs = materializeRuns(obj);
+  let position = 0;
+  let first: string | undefined;
+  for (const run of runs) {
+    const runEnd = position + run.text.length;
+    if (runEnd > start && position < end) {
+      const family = run.fontFamily ?? obj.fontFamily;
+      if (first === undefined) first = family;
+      else if (family !== first) return "Mixed";
+    }
+    position = runEnd;
+  }
+  return first ?? obj.fontFamily;
+}
+
 function mutateTextStyle(
   draft: { objects: Record<string, PDFObject> },
   id: string,
@@ -234,6 +215,30 @@ export function TextProperties() {
   );
 
   const [fontSearch, setFontSearch] = useState("");
+  const [uploadedFonts, setUploadedFonts] = useState<UploadedFontMetadata[]>([]);
+  const [fontError, setFontError] = useState<string | null>(null);
+  const [fontUploading, setFontUploading] = useState(false);
+  const fontInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void loadUploadedFontCatalogue()
+      .then((fonts) => {
+        if (active) setUploadedFonts(fonts);
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setFontError(
+            error instanceof Error
+              ? `Could not load imported fonts: ${error.message}`
+              : "Could not load imported fonts.",
+          );
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Global Ctrl+B / Ctrl+I / Ctrl+U handler.
   // Reads live state from the store at event time — no refs, no stale closures.
@@ -338,8 +343,61 @@ export function TextProperties() {
   };
 
   const applyFont = (font: string) => {
-    apply({ fontFamily: font });
+    const activeRange =
+      textSelection && textSelection.start < textSelection.end
+        ? textSelection
+        : null;
+    commit("Change font family", (d) => {
+      for (const obj of selected) {
+        const cur = d.objects[obj.id];
+        if (!isTextLike(cur)) continue;
+        if (activeRange?.objectId === cur.id) {
+          d.objects[cur.id] = applyStyleToRange(
+            cur,
+            activeRange.start,
+            activeRange.end,
+            { fontFamily: font },
+          ) as PDFObject;
+          continue;
+        }
+        if (activeRange) continue;
+        d.objects[cur.id] = {
+          ...cur,
+          ...(cur.kind === "text-run" ? { dirty: true } : {}),
+          fontFamily: font,
+          ...(cur.runs
+            ? {
+                runs: cur.runs.map((run) => ({
+                  ...run,
+                  fontFamily: font,
+                })),
+              }
+            : {}),
+        } as PDFObject;
+      }
+    });
     pushRecentFont(font);
+  };
+
+  const handleFontUpload = async (
+    event: ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setFontUploading(true);
+    setFontError(null);
+    try {
+      const imported = await importUploadedFont(file);
+      setUploadedFonts(await loadUploadedFontCatalogue());
+      applyFont(imported.family);
+    } catch (error) {
+      setFontError(
+        error instanceof Error ? error.message : "The font could not be imported.",
+      );
+    } finally {
+      setFontUploading(false);
+    }
   };
 
   const handleReset = () => {
@@ -361,17 +419,23 @@ export function TextProperties() {
   };
 
   // ── Computed mixed-value display ─────────────────────────────────────────
-  const ff = mixed(selected, "fontFamily");
+  const range =
+    textSelection && textSelection.start < textSelection.end
+      ? textSelection
+      : null;
+  const rangeTargets = range
+    ? selected.filter((obj) => obj.id === range.objectId)
+    : [];
+  const ff =
+    range && rangeTargets.length > 0
+      ? fontForRange(rangeTargets[0], range.start, range.end)
+      : mixed(selected, "fontFamily");
   const fs = mixed(selected, "fontSize");
   const col = mixed(selected, "color");
   const al = mixed(selected, "align");
   const lh = mixed(selected, "lineHeight");
   const ls = mixed(selected, "letterSpacing");
   const op = mixed(selected, "opacity");
-  const range =
-    textSelection && textSelection.start < textSelection.end
-      ? textSelection
-      : null;
   const isBold = mixedStyle(selected, "bold", range);
   const isItalic = mixedStyle(selected, "italic", range);
   const isUnderline = mixedStyle(selected, "underline", range);
@@ -385,21 +449,51 @@ export function TextProperties() {
   const displayOp =
     op === "Mixed" ? "" : String(Math.round((op as number) * 100));
 
-  const filteredGroups = fontSearch.trim()
-    ? [
-        {
-          label: "Results",
-          fonts: ALL_FONTS.filter((f) =>
-            f.toLowerCase().includes(fontSearch.toLowerCase()),
+  const fontGroups = getFontCandidateGroups().map((group) => ({
+    label: group.label,
+    fonts: group.fonts.map((font) => ({
+      family: font.family,
+      label: font.family,
+    })),
+  }));
+  const uploadedGroup = {
+    label: "Imported fonts",
+    fonts: uploadedFonts.map((font) => ({
+      family: font.family,
+      label: font.family.replace(/\s+\(Imported\)$/, ""),
+    })),
+  };
+  const search = fontSearch.trim().toLowerCase();
+  const filteredGroups = search
+    ? [...fontGroups, uploadedGroup]
+        .map((group) => ({
+          ...group,
+          fonts: group.fonts.filter((font) =>
+            font.label.toLowerCase().includes(search),
           ),
-        },
-      ]
+        }))
+        .filter((group) => group.fonts.length > 0)
     : [
         ...(recentFonts.length > 0
-          ? [{ label: "Recently Used", fonts: recentFonts }]
+          ? [
+              {
+                label: "Recently Used",
+                fonts: recentFonts.map((family) => ({
+                  family,
+                  label: family.replace(/\s+\(Imported\)$/, ""),
+                })),
+              },
+            ]
           : []),
-        ...FONT_GROUPS,
+        uploadedGroup,
+        ...fontGroups,
       ];
+  const knownFontFamilies = new Set([
+    ...FONT_CATALOGUE.map((font) => font.family),
+    ...uploadedFonts.map((font) => font.family),
+  ]);
+  const missingCurrentFont =
+    typeof ff === "string" && !knownFontFamilies.has(ff) ? ff : null;
 
   const canReset = selected.some(
     (s) => s.kind === "text-run" && (s as TextRunObject).dirty,
@@ -433,24 +527,71 @@ export function TextProperties() {
           value={ff === "Mixed" ? undefined : (ff as string)}
           onChange={(e) => applyFont(e.target.value)}
           className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1"
-          style={{ fontFamily: ff === "Mixed" ? undefined : (ff as string) }}
-          size={5}
+          style={{
+            fontFamily:
+              ff === "Mixed" ? undefined : getFontCssStack(ff as string),
+          }}
+          size={1}
         >
           {ff === "Mixed" && (
             <option value="" disabled>
               — Mixed —
             </option>
           )}
+          {missingCurrentFont && (
+            <optgroup label="Current document font">
+              <option value={missingCurrentFont}>
+                {missingCurrentFont} · unavailable in catalogue
+              </option>
+            </optgroup>
+          )}
           {filteredGroups.map((group) => (
             <optgroup key={group.label} label={group.label}>
-              {group.fonts.map((f) => (
-                <option key={f} value={f} style={{ fontFamily: f }}>
-                  {f}
+              {group.fonts.map((font) => (
+                <option
+                  key={font.family}
+                  value={font.family}
+                  style={{ fontFamily: getFontCssStack(font.family) }}
+                >
+                  {font.label}
                 </option>
               ))}
             </optgroup>
           ))}
         </select>
+        <div className="flex items-center gap-2">
+          <input
+            ref={fontInputRef}
+            type="file"
+            accept=".ttf,.otf,font/ttf,font/otf,application/x-font-opentype"
+            className="hidden"
+            aria-label="Choose a TTF or OTF font"
+            onChange={handleFontUpload}
+          />
+          <button
+            type="button"
+            disabled={fontUploading}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => fontInputRef.current?.click()}
+            className="inline-flex items-center gap-1 rounded border border-zinc-700 px-2 py-1 hover:bg-zinc-800 disabled:opacity-50"
+          >
+            <Upload className="h-3.5 w-3.5" />
+            {fontUploading ? "Importing…" : "Import TTF/OTF"}
+          </button>
+          <span className="text-[10px] text-zinc-500">
+            10 MB max · saved locally
+          </span>
+        </div>
+        <p className="text-[10px] text-zinc-500">
+          Device fonts may be unavailable on another device; PDF export uses a
+          standard-font substitute. Only Noto Sans is bundled. Import fonts
+          only when you have permission to use and embed them.
+        </p>
+        {fontError && (
+          <p role="alert" className="text-[11px] text-red-400">
+            {fontError}
+          </p>
+        )}
       </div>
 
       {/* ── B I U S ──────────────────────────────────────────────────────── */}

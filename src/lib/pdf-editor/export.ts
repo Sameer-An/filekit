@@ -34,7 +34,11 @@
     NewImageObject,
     OverlaySettings,
     } from "./types";
-    import { resolveFontForRun, hexToRgbTriplet } from "./fonts";
+    import {
+    resolveFontForRun,
+    hexToRgbTriplet,
+    type UploadedPdfFont,
+    } from "./fonts";
     import { applyPageOps } from "./page-ops";
     import { getOverlayRects, DEFAULT_OVERLAYS } from "./overlay-layout";
 
@@ -46,6 +50,7 @@
     pageOps: PageOp[];
     overlays: OverlaySettings;
     options: ExportOptions;
+    uploadedFonts?: Record<string, UploadedPdfFont>;
     }
 
     /** Top-level entry point. Returns the bytes of the final PDF. */
@@ -166,7 +171,13 @@
         for (const id of ids) {
         const obj = finalObjects[id];
         if (!obj) continue;
-        await drawObject(target, page, obj, finalPages[pageIdx]);
+        await drawObject(
+        target,
+        page,
+        obj,
+        finalPages[pageIdx],
+        input.uploadedFonts ?? {},
+        );
         }
 
         // Pass 3: draw overlays (Header, Footer, Watermark, Page Numbers)
@@ -228,12 +239,13 @@
     page: PDFPage,
     obj: PDFObject,
     pageInfo: PageInfo,
+    uploadedFonts: Record<string, UploadedPdfFont>,
     ): Promise<void> {
     switch (obj.kind) {
         case "text-run":
-        return drawTextRun(doc, page, obj, pageInfo);
+        return drawTextRun(doc, page, obj, pageInfo, uploadedFonts);
         case "new-text":
-        return drawNewText(doc, page, obj);
+        return drawNewText(doc, page, obj, uploadedFonts);
         case "image-placement":
         return drawImagePlacement(doc, page, obj);
         case "new-image":
@@ -308,6 +320,7 @@
     async function buildEffectiveSegments(
     doc: PDFDocument,
     obj: TextRunObject | NewTextObject,
+    uploadedFonts: Record<string, UploadedPdfFont>,
     ): Promise<EffectiveTextSegment[]> {
     const source: StyledTextRun[] =
         obj.runs && obj.runs.length > 0 ? obj.runs : [{ text: obj.text }];
@@ -324,12 +337,19 @@
         const fontSize = seg.fontSize ?? obj.fontSize;
         const colorHex = seg.color ?? obj.color;
         const letterSpacing = seg.letterSpacing ?? obj.letterSpacing;
+        const uploadedFont = uploadedFonts[fontFamily];
+        if (fontFamily.endsWith(" (Imported)") && !uploadedFont) {
+        throw new Error(
+            `The imported font "${fontFamily}" is unavailable. Re-import it before exporting this document.`,
+        );
+        }
 
         const resolved = await resolveFontForRun(doc, {
         fontFamily,
         bold,
         italic,
         text: seg.text,
+        uploadedFont,
         });
         const [cr, cg, cb] = hexToRgbTriplet(colorHex);
 
@@ -360,8 +380,9 @@
     page: PDFPage,
     obj: TextRunObject | NewTextObject,
     rect: { x: number; y: number; w: number; h: number },
+    uploadedFonts: Record<string, UploadedPdfFont>,
     ): Promise<void> {
-    const segments = await buildEffectiveSegments(doc, obj);
+    const segments = await buildEffectiveSegments(doc, obj, uploadedFonts);
     if (segments.length === 0) return;
 
     // Flatten to per-character run indices so we can walk the combined text in
@@ -622,19 +643,21 @@
     page: PDFPage,
     run: TextRunObject,
     pageInfo: PageInfo,
+    uploadedFonts: Record<string, UploadedPdfFont>,
     ): Promise<void> {
     if (!run.dirty || run.deleted) return;
     const rect = clampRect(run.rect, pageInfo);
-    await drawMixedText(doc, page, run, rect);
+    await drawMixedText(doc, page, run, rect, uploadedFonts);
     }
 
     async function drawNewText(
     doc: PDFDocument,
     page: PDFPage,
     obj: NewTextObject,
+    uploadedFonts: Record<string, UploadedPdfFont>,
     ): Promise<void> {
     const rect = obj.rect;
-    await drawMixedText(doc, page, obj, rect);
+    await drawMixedText(doc, page, obj, rect, uploadedFonts);
     }
 
     function clampRect(

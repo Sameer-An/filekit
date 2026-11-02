@@ -8,7 +8,7 @@
     export function StatusBar() {
     const zoom = usePdfEditor((s) => s.zoom);
     const numPages = usePdfEditor((s) => s.numPages);
-    const currentPage = usePdfEditor((s) => s.scrollPage);
+    const currentPageLabel = usePdfEditor((s) => s.scrollPage + 1);
     const dirty = usePdfEditor((s) => s.dirty);
     const savedAt = usePdfEditor((s) => s.savedAt);
     const gridVisible = usePdfEditor((s) => s.gridVisible);
@@ -45,7 +45,7 @@
     return (
         <div className="shrink-0 flex items-center gap-3 px-3 h-7 bg-zinc-950 border-t border-zinc-800 text-[11px] text-zinc-500">
         <span className="tabular-nums">
-            Page {numPages > 0 ? currentPage + 1 : 0} of {numPages}
+            Page {numPages > 0 ? currentPageLabel : 0} of {numPages}
         </span>
         <span className="tabular-nums">Zoom {Math.round(zoom * 100)}%</span>
         {gridVisible && <span className="text-emerald-500">Grid on</span>}
